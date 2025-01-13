@@ -80,7 +80,7 @@ func (p PennyDB) HideComment(ctx context.Context, commentId int64) error {
 	return nil
 }
 
-func (p PennyDB) DeletComment(ctx context.Context, commentId int64) error {
+func (p PennyDB) DeleteComment(ctx context.Context, commentId int64) error {
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
 		panic(err)

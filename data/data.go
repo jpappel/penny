@@ -79,7 +79,7 @@ func initRelations(db *sql.DB) {
 	}
 
 	_, err = db.Exec(`CREATE VIEW IF NOT EXISTS Parents AS
-    WITH RECURSIVE parents(startId, parentId, childId AS (
+    WITH RECURSIVE parents(startId, parentId, childId) AS (
          SELECT childId, parentId, childId
          FROM Relations
          UNION ALL
@@ -93,7 +93,7 @@ func initRelations(db *sql.DB) {
 		panic(err)
 	}
 
-	_, err = db.Exec(`CREATE VIEW Descendants AS
+	_, err = db.Exec(`CREATE VIEW IF NOT EXISTS Descendants AS
     WITH RECURSIVE descendants(startId, childId) AS (
         SELECT childId, childId
         FROM Relations
