@@ -29,7 +29,7 @@ func parseComment(result *sql.Rows, unixTime int64) (Comment, error) {
 }
 
 func (p PennyDB) GetPageCommentsById(ctx context.Context, pageId int) ([]Comment, error) {
-	now := time.Now().UTC().Unix()
+	now := ctx.Value("now").(int64)
 	result, err := p.Db.QueryContext(ctx, `SELECT id, hiddenTime, deletedTime, postedTime, content, children
     FROM Comments
     JOIN Descendants ON Comments.id = Descendants.commentId
@@ -52,7 +52,7 @@ func (p PennyDB) GetPageCommentsById(ctx context.Context, pageId int) ([]Comment
 }
 
 func (p PennyDB) GetPageComments(ctx context.Context, pageUrl string) ([]Comment, error) {
-	now := time.Now().UTC().Unix()
+	now := ctx.Value("now").(int64)
 	result, err := p.Db.QueryContext(ctx, `SELECT Comments.id, hiddenTime, deletedTime, postedTime, content, children
     FROM Comments
     JOIN Pages ON Comments.pageId = Pages.id
@@ -76,7 +76,7 @@ func (p PennyDB) GetPageComments(ctx context.Context, pageUrl string) ([]Comment
 }
 
 func (p PennyDB) GetPageRootComments(ctx context.Context, pageUrl string) ([]Comment, error) {
-	now := time.Now().UTC().Unix()
+	now := ctx.Value("now").(int64)
 	// PERF: this query is very ugly and should be written with less joins :)
 	result, err := p.Db.QueryContext(ctx, `SELECT Comments.id, hiddenTime, deletedTime, postedTime, content, children
     FROM Comments
@@ -102,7 +102,7 @@ func (p PennyDB) GetPageRootComments(ctx context.Context, pageUrl string) ([]Com
 }
 
 func (p PennyDB) GetCommentById(ctx context.Context, commentId int) (Comment, error) {
-	now := time.Now().UTC().Unix()
+	now := ctx.Value("now").(int64)
 	row := p.Db.QueryRowContext(ctx, `SELECT id, hiddenTime, deletedTime, postedTime, content, children
     FROM Comments JOIN Descendants ON Comments.id = Descendants.commentId WHERE id = ?`, commentId)
 
@@ -133,7 +133,7 @@ func (p PennyDB) GetCommentChildren(ctx context.Context, comment *Comment) error
 		return nil
 	}
 
-	now := time.Now().UTC().Unix()
+	now := ctx.Value("now").(int64)
 	if comment.Children == nil {
 		comment.Children = make([]Comment, 0, comment.NumChildren)
 	}

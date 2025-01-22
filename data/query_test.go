@@ -10,6 +10,8 @@ import (
 	"github.com/jpappel/penny/data"
 )
 
+const MaxInt64 int64 = 1<<63 - 1
+
 type CommentsTestCase struct {
 	name        string
 	expected    []data.Comment
@@ -288,7 +290,8 @@ func TestGetPageCommentsById(t *testing.T) {
 			nil,
 			singleComment,
 			func(p data.PennyDB) ([]data.Comment, error) {
-				return p.GetPageCommentsById(context.Background(), -1)
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				return p.GetPageCommentsById(ctx, -1)
 			}},
 		{"SingleComment",
 			[]data.Comment{
@@ -297,7 +300,8 @@ func TestGetPageCommentsById(t *testing.T) {
 			nil,
 			singleComment,
 			func(p data.PennyDB) ([]data.Comment, error) {
-				return p.GetPageCommentsById(context.Background(), 1)
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				return p.GetPageCommentsById(ctx, 1)
 			}},
 		{"NestedCommentChain",
 			[]data.Comment{
@@ -308,7 +312,8 @@ func TestGetPageCommentsById(t *testing.T) {
 			nil,
 			nestedCommentChain,
 			func(p data.PennyDB) ([]data.Comment, error) {
-				return p.GetPageCommentsById(context.Background(), 1)
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				return p.GetPageCommentsById(ctx, 1)
 			},
 		},
 		{"CommentForest",
@@ -330,7 +335,8 @@ func TestGetPageCommentsById(t *testing.T) {
 			nil,
 			commentForest,
 			func(p data.PennyDB) ([]data.Comment, error) {
-				return p.GetPageCommentsById(context.Background(), 1)
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				return p.GetPageCommentsById(ctx, 1)
 			},
 		},
 	}
@@ -347,7 +353,8 @@ func TestGetPageComments(t *testing.T) {
 			nil,
 			singleComment,
 			func(p data.PennyDB) ([]data.Comment, error) {
-				return p.GetPageComments(context.Background(), "I do not exist")
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				return p.GetPageComments(ctx, "I do not exist")
 			}},
 		{"SingleComment",
 			[]data.Comment{
@@ -356,7 +363,8 @@ func TestGetPageComments(t *testing.T) {
 			nil,
 			singleComment,
 			func(p data.PennyDB) ([]data.Comment, error) {
-				return p.GetPageComments(context.Background(), "apples")
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				return p.GetPageComments(ctx, "apples")
 			}},
 		{"NestedCommentChain",
 			[]data.Comment{
@@ -367,7 +375,8 @@ func TestGetPageComments(t *testing.T) {
 			nil,
 			nestedCommentChain,
 			func(p data.PennyDB) ([]data.Comment, error) {
-				return p.GetPageComments(context.Background(), "peaches")
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				return p.GetPageComments(ctx, "peaches")
 			},
 		},
 		{"CommentForest",
@@ -389,7 +398,8 @@ func TestGetPageComments(t *testing.T) {
 			nil,
 			commentForest,
 			func(p data.PennyDB) ([]data.Comment, error) {
-				return p.GetPageComments(context.Background(), "the")
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				return p.GetPageComments(ctx, "the")
 			},
 		},
 	}
@@ -406,7 +416,8 @@ func TestGetPageRootComments(t *testing.T) {
 			nil,
 			singleComment,
 			func(p data.PennyDB) ([]data.Comment, error) {
-				return p.GetPageRootComments(context.Background(), "I do not exist")
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				return p.GetPageRootComments(ctx, "I do not exist")
 			}},
 		{"SingleComment",
 			[]data.Comment{
@@ -415,7 +426,8 @@ func TestGetPageRootComments(t *testing.T) {
 			nil,
 			singleComment,
 			func(p data.PennyDB) ([]data.Comment, error) {
-				return p.GetPageRootComments(context.Background(), "apples")
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				return p.GetPageRootComments(ctx, "apples")
 			}},
 		{"NestedCommentChain",
 			[]data.Comment{
@@ -424,7 +436,8 @@ func TestGetPageRootComments(t *testing.T) {
 			nil,
 			nestedCommentChain,
 			func(p data.PennyDB) ([]data.Comment, error) {
-				return p.GetPageRootComments(context.Background(), "peaches")
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				return p.GetPageRootComments(ctx, "peaches")
 			},
 		},
 		{"CommentForest",
@@ -436,7 +449,8 @@ func TestGetPageRootComments(t *testing.T) {
 			nil,
 			commentForest,
 			func(p data.PennyDB) ([]data.Comment, error) {
-				return p.GetPageRootComments(context.Background(), "the")
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				return p.GetPageRootComments(ctx, "the")
 			},
 		},
 	}
@@ -453,7 +467,8 @@ func TestGetCommentsById(t *testing.T) {
 			sql.ErrNoRows,
 			singleComment,
 			func(p data.PennyDB) ([]data.Comment, error) {
-				comment, err := p.GetCommentById(context.Background(), 100)
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				comment, err := p.GetCommentById(ctx, 100)
 				return []data.Comment{comment}, err
 			}},
 		{"ValidComment",
@@ -461,7 +476,8 @@ func TestGetCommentsById(t *testing.T) {
 			nil,
 			singleComment,
 			func(p data.PennyDB) ([]data.Comment, error) {
-				comment, err := p.GetCommentById(context.Background(), 1)
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				comment, err := p.GetCommentById(ctx, 1)
 				return []data.Comment{comment}, err
 			}},
 		{"HiddenComment",
@@ -469,7 +485,8 @@ func TestGetCommentsById(t *testing.T) {
 			nil,
 			hiddenComment,
 			func(p data.PennyDB) ([]data.Comment, error) {
-				comment, err := p.GetCommentById(context.Background(), 1)
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				comment, err := p.GetCommentById(ctx, 1)
 				return []data.Comment{comment}, err
 			},
 		},
@@ -478,7 +495,8 @@ func TestGetCommentsById(t *testing.T) {
 			nil,
 			deletedComment,
 			func(p data.PennyDB) ([]data.Comment, error) {
-				comment, err := p.GetCommentById(context.Background(), 1)
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				comment, err := p.GetCommentById(ctx, 1)
 				return []data.Comment{comment}, err
 			},
 		},
@@ -497,7 +515,8 @@ func TestGetCommentChildren(t *testing.T) {
 			singleComment,
 			func(p data.PennyDB) ([]data.Comment, error) {
 				comment := data.Comment{}
-				err := p.GetCommentChildren(context.Background(), &comment)
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				err := p.GetCommentChildren(ctx, &comment)
 				return comment.Children, err
 			},
 		},
@@ -507,7 +526,8 @@ func TestGetCommentChildren(t *testing.T) {
 			singleComment,
 			func(p data.PennyDB) ([]data.Comment, error) {
 				comment := data.Comment{1, "pie", false, false, time.Unix(0, 0), 0, nil}
-				err := p.GetCommentChildren(context.Background(), &comment)
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				err := p.GetCommentChildren(ctx, &comment)
 				return comment.Children, err
 			},
 		},
@@ -522,7 +542,8 @@ func TestGetCommentChildren(t *testing.T) {
 			commentForest,
 			func(p data.PennyDB) ([]data.Comment, error) {
 				comment := data.Comment{3, "last", false, false, time.Unix(2, 0), 4, nil}
-				err := p.GetCommentChildren(context.Background(), &comment)
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				err := p.GetCommentChildren(ctx, &comment)
 				return comment.Children, err
 			},
 		},
