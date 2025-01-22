@@ -13,7 +13,7 @@ func parseComment(result *sql.Rows, unixTime int64) (Comment, error) {
 	var deletedTime sql.NullInt64
 	var postedTime int64
 	if err := result.Scan(&comment.Id, &hiddenTime, &deletedTime, &postedTime, &comment.Content, &comment.NumChildren); err != nil {
-		return Comment{}, nil
+		return Comment{}, err
 	}
 
 	if hiddenTime.Valid {
@@ -30,10 +30,10 @@ func parseComment(result *sql.Rows, unixTime int64) (Comment, error) {
 
 func (p PennyDB) GetPageCommentsById(ctx context.Context, pageId int) ([]Comment, error) {
 	now := time.Now().UTC().Unix()
-	result, err := p.db.QueryContext(ctx, `SELECT id, hiddenTime, deletedTime, postedTime, content, children
+	result, err := p.Db.QueryContext(ctx, `SELECT id, hiddenTime, deletedTime, postedTime, content, children
     FROM Comments
     JOIN Descendants ON Comments.id = Descendants.commentId
-    WHERE pageId = ? AND (deletedTime > ? OR deletedTime IS NULL)`, pageId, now)
+    WHERE pageId = ?`, pageId)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +53,7 @@ func (p PennyDB) GetPageCommentsById(ctx context.Context, pageId int) ([]Comment
 
 func (p PennyDB) GetPageComments(ctx context.Context, pageUrl string) ([]Comment, error) {
 	now := time.Now().UTC().Unix()
-	result, err := p.db.QueryContext(ctx, `SELECT Comments.id, hiddenTime, deletedTime, postedTime, content, children
+	result, err := p.Db.QueryContext(ctx, `SELECT Comments.id, hiddenTime, deletedTime, postedTime, content, children
     FROM Comments
     JOIN Pages ON Comments.pageId = Pages.id
     JOIN Descendants ON Comments.id = Descendants.commentId
@@ -77,8 +77,8 @@ func (p PennyDB) GetPageComments(ctx context.Context, pageUrl string) ([]Comment
 
 func (p PennyDB) GetPageRootComments(ctx context.Context, pageUrl string) ([]Comment, error) {
 	now := time.Now().UTC().Unix()
-	// PERF: this query should be optimized to require less joins
-	result, err := p.db.QueryContext(ctx, `SELECT Comments.id, hiddenTime, deletedTime, postedTime, content, children
+	// PERF: this query is very ugly and should be written with less joins :)
+	result, err := p.Db.QueryContext(ctx, `SELECT Comments.id, hiddenTime, deletedTime, postedTime, content, children
     FROM Comments
     JOIN Pages on Comments.pageId = Pages.id
     JOIN Descendants ON Comments.id = Descendants.commentId
@@ -103,15 +103,15 @@ func (p PennyDB) GetPageRootComments(ctx context.Context, pageUrl string) ([]Com
 
 func (p PennyDB) GetCommentById(ctx context.Context, commentId int) (Comment, error) {
 	now := time.Now().UTC().Unix()
-	row := p.db.QueryRowContext(ctx, `SELECT id, hiddenTime, deletedTime, postedTime, content, children
+	row := p.Db.QueryRowContext(ctx, `SELECT id, hiddenTime, deletedTime, postedTime, content, children
     FROM Comments JOIN Descendants ON Comments.id = Descendants.commentId WHERE id = ?`, commentId)
 
 	comment := Comment{}
 	var hiddenTime sql.NullInt64
 	var deletedTime sql.NullInt64
 	var postedTime int64
-	if err := row.Scan(&comment.Id, &hiddenTime, &deletedTime, &postedTime, &comment.Content); err != nil {
-		return Comment{}, nil
+	if err := row.Scan(&comment.Id, &hiddenTime, &deletedTime, &postedTime, &comment.Content, &comment.NumChildren); err != nil {
+		return Comment{}, err
 	}
 
 	if hiddenTime.Valid {
@@ -138,11 +138,11 @@ func (p PennyDB) GetCommentChildren(ctx context.Context, comment *Comment) error
 		comment.Children = make([]Comment, 0, comment.NumChildren)
 	}
 
-	result, err := p.db.QueryContext(ctx, `SELECT id, hiddenTime, deletedTime, postedTime, content, children
+	result, err := p.Db.QueryContext(ctx, `SELECT id, hiddenTime, deletedTime, postedTime, content, children
     FROM Comments
     JOIN Descendants ON Comments.id = Descendants.commentId
-    Join Relations ON Comments.id = Relations.childId
-    WHERE id = ? AND parentId = ?`, comment.Id, comment.Id)
+    JOIN Relations ON Comments.id = Relations.childId
+    WHERE parentId = ?`, comment.Id)
 	if err != nil {
 		return err
 	}

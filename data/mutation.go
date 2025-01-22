@@ -7,7 +7,7 @@ import (
 )
 
 func (p PennyDB) PostComment(ctx context.Context, page string, user string, comment Comment, parentId *int64) (int, error) {
-	tx, err := p.db.BeginTx(ctx, nil)
+	tx, err := p.Db.BeginTx(ctx, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -65,7 +65,7 @@ func (p PennyDB) PostComment(ctx context.Context, page string, user string, comm
 }
 
 func (p PennyDB) HideComment(ctx context.Context, commentId int64) error {
-	tx, err := p.db.BeginTx(ctx, nil)
+	tx, err := p.Db.BeginTx(ctx, nil)
 	if err != nil {
 		panic(err)
 	}
@@ -81,7 +81,7 @@ func (p PennyDB) HideComment(ctx context.Context, commentId int64) error {
 }
 
 func (p PennyDB) DeleteComment(ctx context.Context, commentId int64) error {
-	tx, err := p.db.BeginTx(ctx, nil)
+	tx, err := p.Db.BeginTx(ctx, nil)
 	if err != nil {
 		panic(err)
 	}

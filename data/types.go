@@ -31,5 +31,5 @@ func (c Comment) Hash() string {
 }
 
 type PennyDB struct {
-	db *sql.DB
+	Db *sql.DB // public for testing purposes
 }
