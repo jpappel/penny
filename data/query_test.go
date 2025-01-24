@@ -291,7 +291,7 @@ func TestGetPageCommentsById(t *testing.T) {
 			singleComment,
 			func(p data.PennyDB) ([]data.Comment, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
-				return p.GetPageCommentsById(ctx, -1)
+				return p.GetPageCommentsById(ctx, -1, data.SortPaginate{})
 			}},
 		{"SingleComment",
 			[]data.Comment{
@@ -301,7 +301,7 @@ func TestGetPageCommentsById(t *testing.T) {
 			singleComment,
 			func(p data.PennyDB) ([]data.Comment, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
-				return p.GetPageCommentsById(ctx, 1)
+				return p.GetPageCommentsById(ctx, 1, data.SortPaginate{})
 			}},
 		{"NestedCommentChain",
 			[]data.Comment{
@@ -313,7 +313,7 @@ func TestGetPageCommentsById(t *testing.T) {
 			nestedCommentChain,
 			func(p data.PennyDB) ([]data.Comment, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
-				return p.GetPageCommentsById(ctx, 1)
+				return p.GetPageCommentsById(ctx, 1, data.SortPaginate{})
 			},
 		},
 		{"CommentForest",
@@ -336,7 +336,7 @@ func TestGetPageCommentsById(t *testing.T) {
 			commentForest,
 			func(p data.PennyDB) ([]data.Comment, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
-				return p.GetPageCommentsById(ctx, 1)
+				return p.GetPageCommentsById(ctx, 1, data.SortPaginate{})
 			},
 		},
 	}
@@ -417,7 +417,7 @@ func TestGetPageRootComments(t *testing.T) {
 			singleComment,
 			func(p data.PennyDB) ([]data.Comment, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
-				return p.GetPageRootComments(ctx, "I do not exist")
+				return p.GetPageRootComments(ctx, "I do not exist", data.SortPaginate{})
 			}},
 		{"SingleComment",
 			[]data.Comment{
@@ -427,7 +427,7 @@ func TestGetPageRootComments(t *testing.T) {
 			singleComment,
 			func(p data.PennyDB) ([]data.Comment, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
-				return p.GetPageRootComments(ctx, "apples")
+				return p.GetPageRootComments(ctx, "apples", data.SortPaginate{})
 			}},
 		{"NestedCommentChain",
 			[]data.Comment{
@@ -437,7 +437,7 @@ func TestGetPageRootComments(t *testing.T) {
 			nestedCommentChain,
 			func(p data.PennyDB) ([]data.Comment, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
-				return p.GetPageRootComments(ctx, "peaches")
+				return p.GetPageRootComments(ctx, "peaches", data.SortPaginate{})
 			},
 		},
 		{"CommentForest",
@@ -450,7 +450,7 @@ func TestGetPageRootComments(t *testing.T) {
 			commentForest,
 			func(p data.PennyDB) ([]data.Comment, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
-				return p.GetPageRootComments(ctx, "the")
+				return p.GetPageRootComments(ctx, "the", data.SortPaginate{})
 			},
 		},
 	}
@@ -516,7 +516,7 @@ func TestGetCommentChildren(t *testing.T) {
 			func(p data.PennyDB) ([]data.Comment, error) {
 				comment := data.Comment{}
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
-				err := p.GetCommentChildren(ctx, &comment)
+				err := p.GetCommentChildren(ctx, &comment, data.SortPaginate{})
 				return comment.Children, err
 			},
 		},
@@ -527,7 +527,7 @@ func TestGetCommentChildren(t *testing.T) {
 			func(p data.PennyDB) ([]data.Comment, error) {
 				comment := data.Comment{1, "pie", false, false, time.Unix(0, 0), 0, nil}
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
-				err := p.GetCommentChildren(ctx, &comment)
+				err := p.GetCommentChildren(ctx, &comment, data.SortPaginate{})
 				return comment.Children, err
 			},
 		},
@@ -543,7 +543,27 @@ func TestGetCommentChildren(t *testing.T) {
 			func(p data.PennyDB) ([]data.Comment, error) {
 				comment := data.Comment{3, "last", false, false, time.Unix(2, 0), 4, nil}
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
-				err := p.GetCommentChildren(ctx, &comment)
+				err := p.GetCommentChildren(ctx, &comment, data.SortPaginate{})
+				return comment.Children, err
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, testCase.Test)
+	}
+}
+
+func TestBFSGetCommentChildren(t *testing.T) {
+	testCases := []CommentsTestCase{
+		{"NoChildren",
+			[]data.Comment{},
+			nil,
+			singleComment,
+			func(p data.PennyDB) ([]data.Comment, error) {
+				comment := data.Comment{1, "pie", false, false, time.Unix(0, 0), 0, nil}
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				err := p.BFSGetCommentChildren(ctx, &comment, 200, data.SortPaginate{})
 				return comment.Children, err
 			},
 		},

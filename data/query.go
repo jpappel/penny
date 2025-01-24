@@ -3,8 +3,16 @@ package data
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 )
+
+type SortPaginate struct {
+	Order      string
+	Descending bool
+	Limit      int
+	Offset     int
+}
 
 // Parse a comment from a sql row
 func parseComment(result *sql.Rows, unixTime int64) (Comment, error) {
@@ -28,12 +36,35 @@ func parseComment(result *sql.Rows, unixTime int64) (Comment, error) {
 	return comment, nil
 }
 
-func (p PennyDB) GetPageCommentsById(ctx context.Context, pageId int) ([]Comment, error) {
+// Creates a sorted and or paginated version of a query
+func (sp SortPaginate) update(query string) string {
+	newQuery := query
+
+	if sp.Order == "id" || sp.Order == "postedTime" {
+		orderStr := "ASC"
+		if sp.Descending {
+			orderStr = "DESC"
+		}
+		newQuery = fmt.Sprintf("%s\nORDER BY %s %s", newQuery, sp.Order, orderStr)
+	}
+
+	if sp.Limit > 0 && sp.Offset >= 0 {
+		newQuery = fmt.Sprintf("%s\nLIMIT %d\nOFFSET %d", newQuery, sp.Limit, sp.Offset)
+	}
+
+	return newQuery
+}
+
+func (p PennyDB) GetPageCommentsById(ctx context.Context, pageId int, sp SortPaginate) ([]Comment, error) {
 	now := ctx.Value("now").(int64)
-	result, err := p.Db.QueryContext(ctx, `SELECT id, hiddenTime, deletedTime, postedTime, content, children
+
+	query := sp.update(`
+    SELECT id, hiddenTime, deletedTime, postedTime, content, children
     FROM Comments
     JOIN Descendants ON Comments.id = Descendants.commentId
-    WHERE pageId = ?`, pageId)
+    WHERE pageId = ?`)
+
+	result, err := p.Db.QueryContext(ctx, query, pageId)
 	if err != nil {
 		return nil, err
 	}
@@ -75,15 +106,18 @@ func (p PennyDB) GetPageComments(ctx context.Context, pageUrl string) ([]Comment
 	return comments, nil
 }
 
-func (p PennyDB) GetPageRootComments(ctx context.Context, pageUrl string) ([]Comment, error) {
+func (p PennyDB) GetPageRootComments(ctx context.Context, pageUrl string, sp SortPaginate) ([]Comment, error) {
 	now := ctx.Value("now").(int64)
 	// PERF: this query is very ugly and should be written with less joins :)
-	result, err := p.Db.QueryContext(ctx, `SELECT Comments.id, hiddenTime, deletedTime, postedTime, content, children
+	query := sp.update(`
+    SELECT Comments.id, hiddenTime, deletedTime, postedTime, content, children
     FROM Comments
     JOIN Pages on Comments.pageId = Pages.id
     JOIN Descendants ON Comments.id = Descendants.commentId
     JOIN Relations ON Comments.id = Relations.childId
-    WHERE url = ? AND parentId IS NULL`, pageUrl)
+    WHERE url = ? AND parentId IS NULL`)
+
+	result, err := p.Db.QueryContext(ctx, query, pageUrl)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +161,7 @@ func (p PennyDB) GetCommentById(ctx context.Context, commentId int) (Comment, er
 }
 
 // Adds a comments children to it
-func (p PennyDB) GetCommentChildren(ctx context.Context, comment *Comment) error {
+func (p PennyDB) GetCommentChildren(ctx context.Context, comment *Comment, sp SortPaginate) error {
 	if comment.NumChildren == 0 {
 		comment.Children = make([]Comment, 0, 5)
 		return nil
@@ -138,11 +172,14 @@ func (p PennyDB) GetCommentChildren(ctx context.Context, comment *Comment) error
 		comment.Children = make([]Comment, 0, comment.NumChildren)
 	}
 
-	result, err := p.Db.QueryContext(ctx, `SELECT id, hiddenTime, deletedTime, postedTime, content, children
+	query := sp.update(`
+    SELECT id, hiddenTime, deletedTime, postedTime, content, children
     FROM Comments
     JOIN Descendants ON Comments.id = Descendants.commentId
     JOIN Relations ON Comments.id = Relations.childId
-    WHERE parentId = ?`, comment.Id)
+    WHERE parentId = ?`)
+
+	result, err := p.Db.QueryContext(ctx, query, comment.Id)
 	if err != nil {
 		return err
 	}
