@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -192,6 +193,106 @@ func (p PennyDB) GetCommentChildren(ctx context.Context, comment *Comment, sp So
 		}
 		comment.Children = append(comment.Children, childComment)
 	}
+
+	return nil
+}
+
+func getChildren(ctx context.Context, queue chan *Comment, stmt *sql.Stmt) error {
+	now := ctx.Value("now").(int64)
+	comment := <-queue
+	rows, err := stmt.QueryContext(ctx, comment.Id)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		childComment, err := parseComment(rows, now)
+		if err != nil {
+			return err
+		}
+		comment.Children = append(comment.Children, childComment)
+		queue <- &comment.Children[len(comment.Children)-1]
+	}
+
+	return nil
+}
+
+// Add children to a comment recursively in a breadth first order up to a relative depth (exclusive)
+func (p PennyDB) BFSGetCommentChildren(ctx context.Context, rootComment *Comment, depth int, sp SortPaginate) error {
+	tx, err := p.Db.BeginTx(ctx, new(sql.TxOptions))
+	if err != nil {
+		return err
+	}
+
+	var rootDepth int
+	row := tx.QueryRowContext(ctx, "SELECT depth FROM Relations WHERE childId = ?", rootComment.Id)
+	if err := row.Scan(&rootDepth); err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	var numDescendants int64
+	row = tx.QueryRowContext(ctx, `
+    WITH RECURSIVE
+    ddsc(childId, depth) AS (
+        VALUES(?, ?)
+        UNION ALL
+        SELECT Relations.childId, Relations.depth
+        FROM Relations
+        JOIN ddsc ON Relations.parentId = ddsc.childId
+    )
+    SELECT COUNT(*) - 1
+    FROM ddsc
+    WHERE depth < ?`, rootComment.Id, rootDepth, rootDepth+depth)
+	if err := row.Scan(&numDescendants); err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	// a number of descendants is returned even for invalid comment Id's
+	// added to throw the expected error
+	if numDescendants < 0 {
+		tx.Rollback()
+		return sql.ErrNoRows
+	} else if numDescendants == 0 {
+		tx.Commit()
+		return nil
+	}
+
+	var wg sync.WaitGroup
+	// PERF: should test different channel sizes
+	queue := make(chan *Comment, 256)
+	queue <- rootComment
+
+	query := sp.update(`
+    SELECT id, hiddenTime, deletedTime, postedTime, content, children
+    FROM Comments
+    JOIN Descendants ON Comments.id = Descendants.commentId
+    JOIN Relations ON Comments.id = Relations.childId
+    WHERE parentId = ?`)
+
+	stmt, err := tx.PrepareContext(ctx, query)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	defer stmt.Close()
+
+	// add root Comment back
+	for range numDescendants + 1 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := getChildren(ctx, queue, stmt); err != nil {
+				// TODO: handle panic
+				panic(err)
+			}
+		}()
+	}
+
+	wg.Wait()
+	tx.Commit()
 
 	return nil
 }

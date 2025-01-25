@@ -1,4 +1,4 @@
-SRC := $(wildcard $(wildcard */*.go)) $(wildcard *.go)
+SRC := $(wildcard $(wildcard */*.go)) $(wildcard *.go) $(wildcard api/templates/*.html)
 
 .PHONY: all
 all: penny

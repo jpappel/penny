@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"iter"
 	"testing"
 	"time"
 
@@ -14,28 +15,28 @@ const MaxInt64 int64 = 1<<63 - 1
 
 type CommentsTestCase struct {
 	name        string
-	expected    []data.Comment
+	expected    data.CommentForest
 	expectedErr error
 	setup       func(string) data.PennyDB
-	runner      func(data.PennyDB) ([]data.Comment, error)
+	runner      func(data.PennyDB) (data.CommentForest, error)
 }
 
-func (c CommentsTestCase) Test(t *testing.T) {
+func (tc CommentsTestCase) Test(t *testing.T) {
 	dir := t.TempDir()
-	p := c.setup(fmt.Sprintf("file:%s/%s.db", dir, c.name))
-	comments, err := c.runner(p)
+	p := tc.setup(fmt.Sprintf("file:%s/%s.db", dir, tc.name))
+	comments, err := tc.runner(p)
 
-	if err != c.expectedErr {
-		t.Fatalf("Unexpected error in GetPageCommentsById: wanted %v got %v\n", c.expectedErr, err)
+	if err != tc.expectedErr {
+		t.Fatalf("Unexpected error in GetPageCommentsById: wanted %v got %v\n", tc.expectedErr, err)
 	}
 
-	if len(comments) != len(c.expected) {
+	if len(comments) != len(tc.expected) {
 		t.Errorf("Recieved a different number of comments than expected: wanted %d got %d\n",
-			len(c.expected), len(comments))
+			len(tc.expected), len(comments))
 	}
 
-	expHashes := make(map[string]bool, len(c.expected))
-	for _, expComment := range c.expected {
+	expHashes := make(map[string]bool, len(tc.expected))
+	for _, expComment := range tc.expected {
 		expHashes[expComment.Hash()] = true
 	}
 
@@ -46,6 +47,44 @@ func (c CommentsTestCase) Test(t *testing.T) {
 		if !ok {
 			t.Error("Recieved an unexpected comment:", comment)
 		}
+	}
+}
+
+// test if the comment forest matches the expected
+func (tc CommentsTestCase) TestForest(t *testing.T) {
+	dir := t.TempDir()
+	p := tc.setup(fmt.Sprintf("file:%s/%s.db", dir, tc.name))
+	comments, err := tc.runner(p)
+
+	if err != tc.expectedErr {
+		t.Fatalf("Unexpected error in GetPageCommentsById: wanted %v got %v\n", tc.expectedErr, err)
+	}
+
+	if cL, eL := comments.Len(), tc.expected.Len(); cL != eL {
+		t.Errorf("Recieved a different number of comments than expected: wanted %d got %d\n", eL, cL)
+	}
+
+	cNext, cStop := iter.Pull(comments.BFS(data.ById))
+	eNext, eStop := iter.Pull(tc.expected.BFS(data.ById))
+	defer cStop()
+	defer eStop()
+
+	c, cMore := cNext()
+	e, eMore := eNext()
+	for cMore && eMore {
+		if c == nil || e == nil {
+			t.Fatalf("Encountered a nil comment")
+		}
+		cHash, eHash := c.Hash(), e.Hash()
+		if cHash != eHash {
+			t.Logf("Comments differ: wanted hash %s with id %d got hash %s with id %d\n", cHash, c.Id, eHash, e.Id)
+			t.Log("Recieved\n", comments)
+			t.Log("\nExpected\n", tc.expected)
+			t.Fail()
+		}
+
+		c, cMore = cNext()
+		e, eMore = eNext()
 	}
 }
 
@@ -289,7 +328,7 @@ func TestGetPageCommentsById(t *testing.T) {
 			nil,
 			nil,
 			singleComment,
-			func(p data.PennyDB) ([]data.Comment, error) {
+			func(p data.PennyDB) (data.CommentForest, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				return p.GetPageCommentsById(ctx, -1, data.SortPaginate{})
 			}},
@@ -299,7 +338,7 @@ func TestGetPageCommentsById(t *testing.T) {
 			},
 			nil,
 			singleComment,
-			func(p data.PennyDB) ([]data.Comment, error) {
+			func(p data.PennyDB) (data.CommentForest, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				return p.GetPageCommentsById(ctx, 1, data.SortPaginate{})
 			}},
@@ -311,7 +350,7 @@ func TestGetPageCommentsById(t *testing.T) {
 			},
 			nil,
 			nestedCommentChain,
-			func(p data.PennyDB) ([]data.Comment, error) {
+			func(p data.PennyDB) (data.CommentForest, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				return p.GetPageCommentsById(ctx, 1, data.SortPaginate{})
 			},
@@ -334,7 +373,7 @@ func TestGetPageCommentsById(t *testing.T) {
 			},
 			nil,
 			commentForest,
-			func(p data.PennyDB) ([]data.Comment, error) {
+			func(p data.PennyDB) (data.CommentForest, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				return p.GetPageCommentsById(ctx, 1, data.SortPaginate{})
 			},
@@ -352,7 +391,7 @@ func TestGetPageComments(t *testing.T) {
 			nil,
 			nil,
 			singleComment,
-			func(p data.PennyDB) ([]data.Comment, error) {
+			func(p data.PennyDB) (data.CommentForest, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				return p.GetPageComments(ctx, "I do not exist")
 			}},
@@ -362,7 +401,7 @@ func TestGetPageComments(t *testing.T) {
 			},
 			nil,
 			singleComment,
-			func(p data.PennyDB) ([]data.Comment, error) {
+			func(p data.PennyDB) (data.CommentForest, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				return p.GetPageComments(ctx, "apples")
 			}},
@@ -374,7 +413,7 @@ func TestGetPageComments(t *testing.T) {
 			},
 			nil,
 			nestedCommentChain,
-			func(p data.PennyDB) ([]data.Comment, error) {
+			func(p data.PennyDB) (data.CommentForest, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				return p.GetPageComments(ctx, "peaches")
 			},
@@ -397,7 +436,7 @@ func TestGetPageComments(t *testing.T) {
 			},
 			nil,
 			commentForest,
-			func(p data.PennyDB) ([]data.Comment, error) {
+			func(p data.PennyDB) (data.CommentForest, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				return p.GetPageComments(ctx, "the")
 			},
@@ -415,7 +454,7 @@ func TestGetPageRootComments(t *testing.T) {
 			nil,
 			nil,
 			singleComment,
-			func(p data.PennyDB) ([]data.Comment, error) {
+			func(p data.PennyDB) (data.CommentForest, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				return p.GetPageRootComments(ctx, "I do not exist", data.SortPaginate{})
 			}},
@@ -425,7 +464,7 @@ func TestGetPageRootComments(t *testing.T) {
 			},
 			nil,
 			singleComment,
-			func(p data.PennyDB) ([]data.Comment, error) {
+			func(p data.PennyDB) (data.CommentForest, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				return p.GetPageRootComments(ctx, "apples", data.SortPaginate{})
 			}},
@@ -435,7 +474,7 @@ func TestGetPageRootComments(t *testing.T) {
 			},
 			nil,
 			nestedCommentChain,
-			func(p data.PennyDB) ([]data.Comment, error) {
+			func(p data.PennyDB) (data.CommentForest, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				return p.GetPageRootComments(ctx, "peaches", data.SortPaginate{})
 			},
@@ -448,7 +487,7 @@ func TestGetPageRootComments(t *testing.T) {
 			},
 			nil,
 			commentForest,
-			func(p data.PennyDB) ([]data.Comment, error) {
+			func(p data.PennyDB) (data.CommentForest, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				return p.GetPageRootComments(ctx, "the", data.SortPaginate{})
 			},
@@ -466,7 +505,7 @@ func TestGetCommentsById(t *testing.T) {
 			[]data.Comment{{}},
 			sql.ErrNoRows,
 			singleComment,
-			func(p data.PennyDB) ([]data.Comment, error) {
+			func(p data.PennyDB) (data.CommentForest, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				comment, err := p.GetCommentById(ctx, 100)
 				return []data.Comment{comment}, err
@@ -475,7 +514,7 @@ func TestGetCommentsById(t *testing.T) {
 			[]data.Comment{{1, "pie", false, false, time.Unix(0, 0), 0, nil}},
 			nil,
 			singleComment,
-			func(p data.PennyDB) ([]data.Comment, error) {
+			func(p data.PennyDB) (data.CommentForest, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				comment, err := p.GetCommentById(ctx, 1)
 				return []data.Comment{comment}, err
@@ -484,7 +523,7 @@ func TestGetCommentsById(t *testing.T) {
 			[]data.Comment{{1, "pie", true, false, time.Unix(0, 0), 0, nil}},
 			nil,
 			hiddenComment,
-			func(p data.PennyDB) ([]data.Comment, error) {
+			func(p data.PennyDB) (data.CommentForest, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				comment, err := p.GetCommentById(ctx, 1)
 				return []data.Comment{comment}, err
@@ -494,7 +533,7 @@ func TestGetCommentsById(t *testing.T) {
 			[]data.Comment{{1, "", false, true, time.Unix(0, 0), 0, nil}},
 			nil,
 			deletedComment,
-			func(p data.PennyDB) ([]data.Comment, error) {
+			func(p data.PennyDB) (data.CommentForest, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				comment, err := p.GetCommentById(ctx, 1)
 				return []data.Comment{comment}, err
@@ -513,7 +552,7 @@ func TestGetCommentChildren(t *testing.T) {
 			[]data.Comment{},
 			nil,
 			singleComment,
-			func(p data.PennyDB) ([]data.Comment, error) {
+			func(p data.PennyDB) (data.CommentForest, error) {
 				comment := data.Comment{}
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				err := p.GetCommentChildren(ctx, &comment, data.SortPaginate{})
@@ -524,7 +563,7 @@ func TestGetCommentChildren(t *testing.T) {
 			[]data.Comment{},
 			nil,
 			singleComment,
-			func(p data.PennyDB) ([]data.Comment, error) {
+			func(p data.PennyDB) (data.CommentForest, error) {
 				comment := data.Comment{1, "pie", false, false, time.Unix(0, 0), 0, nil}
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				err := p.GetCommentChildren(ctx, &comment, data.SortPaginate{})
@@ -540,7 +579,7 @@ func TestGetCommentChildren(t *testing.T) {
 			},
 			nil,
 			commentForest,
-			func(p data.PennyDB) ([]data.Comment, error) {
+			func(p data.PennyDB) (data.CommentForest, error) {
 				comment := data.Comment{3, "last", false, false, time.Unix(2, 0), 4, nil}
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				err := p.GetCommentChildren(ctx, &comment, data.SortPaginate{})
@@ -560,16 +599,52 @@ func TestBFSGetCommentChildren(t *testing.T) {
 			[]data.Comment{},
 			nil,
 			singleComment,
-			func(p data.PennyDB) ([]data.Comment, error) {
+			func(p data.PennyDB) (data.CommentForest, error) {
 				comment := data.Comment{1, "pie", false, false, time.Unix(0, 0), 0, nil}
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				err := p.BFSGetCommentChildren(ctx, &comment, 200, data.SortPaginate{})
 				return comment.Children, err
+			}},
+		{"FullDepth",
+			[]data.Comment{
+				{1, "first", false, false, time.Unix(0, 0), 2, []data.Comment{
+					{4, "letter", false, false, time.Unix(3, 0), 2, []data.Comment{
+						{8, "of the english alphabet descends from proto-sinatic script", false, false, time.Unix(5, 0), 0, nil},
+						{9, "is an inverted bull", false, false, time.Unix(5, 0), 0, nil},
+					}},
+					{5, "animal", false, false, time.Unix(3, 0), 0, nil},
+				}},
+				{2, "second", false, false, time.Unix(1, 0), 1, []data.Comment{
+					{6, "ammendment", false, false, time.Unix(4, 0), 1, []data.Comment{
+						{7, "of the US constitution is the right to bear arms", false, false, time.Unix(5, 0), 0, nil}}}}},
+				{3, "last", false, false, time.Unix(2, 0), 4, []data.Comment{
+					{10, "christmas", false, false, time.Unix(7, 0), 0, nil},
+					{11, "I gave you my heart", false, false, time.Unix(8, 0), 0, nil},
+					{12, "but then the very next day", false, false, time.Unix(9, 0), 0, nil},
+					{13, "you gave it away", false, false, time.Unix(10, 0), 0, nil},
+				}},
+			},
+			nil,
+			commentForest,
+			func(p data.PennyDB) (data.CommentForest, error) {
+				comments := []data.Comment{
+					{1, "first", false, false, time.Unix(0, 0), 2, nil},
+					{2, "second", false, false, time.Unix(1, 0), 1, nil},
+					{3, "last", false, false, time.Unix(2, 0), 4, nil},
+				}
+				ctx := context.WithValue(context.Background(), "now", MaxInt64)
+				for i := range comments {
+					if err := p.BFSGetCommentChildren(ctx, &comments[i], 100, data.SortPaginate{}); err != nil {
+						return comments, err
+					}
+				}
+				return comments, nil
 			},
 		},
+		// {}, // limited depth
 	}
 
 	for _, testCase := range testCases {
-		t.Run(testCase.name, testCase.Test)
+		t.Run(testCase.name, testCase.TestForest)
 	}
 }
