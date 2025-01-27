@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"iter"
+	"slices"
 	"testing"
 	"time"
 
@@ -15,77 +16,121 @@ const MaxInt64 int64 = 1<<63 - 1
 
 type CommentsTestCase struct {
 	name        string
-	expected    data.CommentForest
+	expected    *data.Page
 	expectedErr error
 	setup       func(string) data.PennyDB
-	runner      func(data.PennyDB) (data.CommentForest, error)
+	runner      func(data.PennyDB) (*data.Page, error)
 }
 
-func (tc CommentsTestCase) Test(t *testing.T) {
-	dir := t.TempDir()
-	p := tc.setup(fmt.Sprintf("file:%s/%s.db", dir, tc.name))
-	comments, err := tc.runner(p)
-
-	if err != tc.expectedErr {
-		t.Fatalf("Unexpected error in GetPageCommentsById: wanted %v got %v\n", tc.expectedErr, err)
-	}
-
-	if len(comments) != len(tc.expected) {
-		t.Errorf("Recieved a different number of comments than expected: wanted %d got %d\n",
-			len(tc.expected), len(comments))
-	}
-
-	expHashes := make(map[string]bool, len(tc.expected))
-	for _, expComment := range tc.expected {
-		expHashes[expComment.Hash()] = true
-	}
-
-	for _, comment := range comments {
-		hash := comment.Hash()
-		_, ok := expHashes[hash]
-
-		if !ok {
-			t.Error("Recieved an unexpected comment:", comment)
-		}
-	}
-}
-
-// test if the comment forest matches the expected
 func (tc CommentsTestCase) TestForest(t *testing.T) {
 	dir := t.TempDir()
-	p := tc.setup(fmt.Sprintf("file:%s/%s.db", dir, tc.name))
-	comments, err := tc.runner(p)
+	pdb := tc.setup(fmt.Sprintf("file:%s/%s.db", dir, tc.name))
+	p, err := tc.runner(pdb)
 
 	if err != tc.expectedErr {
-		t.Fatalf("Unexpected error in GetPageCommentsById: wanted %v got %v\n", tc.expectedErr, err)
+		t.Fatalf("Unexpected error: wanted `%v` got `%v`\n", tc.expectedErr, err)
 	}
 
-	if cL, eL := comments.Len(), tc.expected.Len(); cL != eL {
-		t.Errorf("Recieved a different number of comments than expected: wanted %d got %d\n", eL, cL)
+	if p == nil && tc.expected == nil {
+		return
+	} else if p == nil || tc.expected == nil {
+		t.Fatalf("Recieved nil pages: expected %p, result %p\n", tc.expected, p)
 	}
 
-	cNext, cStop := iter.Pull(comments.BFS(data.ById))
-	eNext, eStop := iter.Pull(tc.expected.BFS(data.ById))
-	defer cStop()
-	defer eStop()
+	pNext, pStop := iter.Pull(p.BFS())
+	eNext, eStop := iter.Pull(tc.expected.BFS())
 
-	c, cMore := cNext()
-	e, eMore := eNext()
-	for cMore && eMore {
-		if c == nil || e == nil {
-			t.Fatalf("Encountered a nil comment")
+	pId, pMore := pNext()
+	eId, eMore := eNext()
+	for pMore && eMore {
+		if pId != eId {
+			t.Errorf("Recieved a diffent id than expected: wanted %d got %d\n", eId, pId)
 		}
-		cHash, eHash := c.Hash(), e.Hash()
-		if cHash != eHash {
-			t.Logf("Comments differ: wanted hash %s with id %d got hash %s with id %d\n", cHash, c.Id, eHash, e.Id)
-			t.Log("Recieved\n", comments)
-			t.Log("\nExpected\n", tc.expected)
-			t.Fail()
+		pId, pMore = pNext()
+		eId, eMore = eNext()
+	}
+	pStop()
+	eStop()
+
+	if t.Failed() {
+		t.Log("Expected:\n\n", tc.expected, "\n")
+		t.Log("Recieved:\n\n", p)
+	}
+
+	pIds := make([]int, 0, p.Len())
+	eIds := make([]int, 0, tc.expected.Len())
+
+	p.Comments.Range(func(k any, _ any) bool {
+		id, ok := k.(int)
+		if !ok {
+			t.Fatal("Recieved unexpected key in comments map", k)
+		}
+		pIds = append(pIds, id)
+		return true
+	})
+	tc.expected.Comments.Range(func(k any, _ any) bool {
+		id, ok := k.(int)
+		if !ok {
+			t.Fatal("Recieved unexpected key in expected comments map", k)
+		}
+		eIds = append(eIds, id)
+		return true
+	})
+
+	slices.Sort(pIds)
+	slices.Sort(eIds)
+	for i := range pIds {
+		if pIds[i] != eIds[i] {
+			t.Fatalf("Recieved a different id than expected: wanted %d got %d\n", eIds[i], pIds[i])
+		}
+	}
+
+	eHashes := make(map[int]string, len(eIds))
+	tc.expected.Comments.Range(func(k any, v any) bool {
+		id := k.(int)
+		comment, ok := v.(data.Comment)
+		if !ok {
+			t.Fatal("Recieved unexpected value in expected comments map", v)
 		}
 
-		c, cMore = cNext()
-		e, eMore = eNext()
-	}
+		eHashes[id] = comment.Hash()
+		return true
+	})
+	p.Comments.Range(func(k any, v any) bool {
+		id := k.(int)
+		comment, ok := v.(data.Comment)
+		if !ok {
+			t.Fatal("Recieved unexpected value in comments map", v)
+		}
+
+		if cHash, eHash := comment.Hash(), eHashes[id]; cHash != eHash {
+			t.Errorf("Recieved a different comment hash than expected: id=%d wanted %s, got %s\n", id, eHash, cHash)
+			e, _ := tc.expected.Comments.Load(id)
+			eC := e.(data.Comment)
+			if comment.ParentId != eC.ParentId {
+				t.Logf("\tDiffernt ParentId's: wanted %d, got %d\n", comment.ParentId, eC.ParentId)
+			}
+			if comment.NumChildren != eC.NumChildren {
+				t.Logf("\tDiffernt NumChildren's: wanted %d, got %d\n", comment.NumChildren, eC.NumChildren)
+			}
+			if comment.Deleted != eC.Deleted {
+				t.Logf("\tDiffernt Deletion status: wanted %t, got %t\n", comment.Deleted, eC.Deleted)
+			}
+			if comment.Hidden != eC.Hidden {
+				t.Logf("\tDiffernt Hidden status: wanted %t, got %t\n", comment.Hidden, eC.Hidden)
+			}
+			if !comment.Posted.Equal(eC.Posted) {
+				t.Logf("\tDifferent Posted Time: wanted %v, got %v\n", comment.Posted, eC.Posted)
+			}
+			if comment.Content != eC.Content {
+				t.Logf("\tDifferent Content's:\nwanted:\n%s\n<END>\ngot:\n%s\n<END>", comment.Content, eC.Content)
+			}
+			// t.Log("Recieved\n", comment)
+			// t.Log("\nExpected\n", eComment)
+		}
+
+		return true
+	})
 }
 
 // single comment with a single user
@@ -326,54 +371,52 @@ func TestGetPageCommentsById(t *testing.T) {
 	testCases := []CommentsTestCase{
 		{"MissingPage",
 			nil,
-			nil,
+			sql.ErrNoRows,
 			singleComment,
-			func(p data.PennyDB) (data.CommentForest, error) {
+			func(p data.PennyDB) (*data.Page, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				return p.GetPageCommentsById(ctx, -1, data.SortPaginate{})
 			}},
 		{"SingleComment",
-			[]data.Comment{
-				{1, "pie", false, false, time.Unix(0, 0), 0, nil},
-			},
+			data.NewPage([]data.Comment{{1, 0, "pie", false, false, time.Unix(0, 0), 0}}),
 			nil,
 			singleComment,
-			func(p data.PennyDB) (data.CommentForest, error) {
+			func(p data.PennyDB) (*data.Page, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				return p.GetPageCommentsById(ctx, 1, data.SortPaginate{})
 			}},
 		{"NestedCommentChain",
-			[]data.Comment{
-				{1, "cobbler", false, false, time.Unix(0, 0), 1, nil},
-				{2, "with", false, false, time.Unix(1, 0), 1, nil},
-				{3, "icecream", false, false, time.Unix(2, 0), 0, nil},
-			},
+			data.NewPage([]data.Comment{
+				{1, 0, "cobbler", false, false, time.Unix(0, 0), 1},
+				{2, 1, "with", false, false, time.Unix(1, 0), 1},
+				{3, 2, "icecream", false, false, time.Unix(2, 0), 0},
+			}),
 			nil,
 			nestedCommentChain,
-			func(p data.PennyDB) (data.CommentForest, error) {
+			func(p data.PennyDB) (*data.Page, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				return p.GetPageCommentsById(ctx, 1, data.SortPaginate{})
 			},
 		},
 		{"CommentForest",
-			[]data.Comment{
-				{1, "first", false, false, time.Unix(0, 0), 2, nil},
-				{2, "second", false, false, time.Unix(1, 0), 1, nil},
-				{3, "last", false, false, time.Unix(2, 0), 4, nil},
-				{4, "letter", false, false, time.Unix(3, 0), 2, nil},
-				{5, "animal", false, false, time.Unix(3, 0), 0, nil},
-				{6, "ammendment", false, false, time.Unix(4, 0), 1, nil},
-				{7, "of the US constitution is the right to bear arms", false, false, time.Unix(5, 0), 0, nil},
-				{8, "of the english alphabet descends from proto-sinatic script", false, false, time.Unix(5, 0), 0, nil},
-				{9, "is an inverted bull", false, false, time.Unix(5, 0), 0, nil},
-				{10, "christmas", false, false, time.Unix(7, 0), 0, nil},
-				{11, "I gave you my heart", false, false, time.Unix(8, 0), 0, nil},
-				{12, "but then the very next day", false, false, time.Unix(9, 0), 0, nil},
-				{13, "you gave it away", false, false, time.Unix(10, 0), 0, nil},
-			},
+			data.NewPage([]data.Comment{
+				{1, 0, "first", false, false, time.Unix(0, 0), 2},
+				{2, 0, "second", false, false, time.Unix(1, 0), 1},
+				{3, 0, "last", false, false, time.Unix(2, 0), 4},
+				{4, 1, "letter", false, false, time.Unix(3, 0), 2},
+				{5, 1, "animal", false, false, time.Unix(3, 0), 0},
+				{6, 2, "ammendment", false, false, time.Unix(4, 0), 1},
+				{7, 6, "of the US constitution is the right to bear arms", false, false, time.Unix(5, 0), 0},
+				{8, 4, "of the english alphabet descends from proto-sinatic script", false, false, time.Unix(5, 0), 0},
+				{9, 4, "is an inverted bull", false, false, time.Unix(5, 0), 0},
+				{10, 3, "christmas", false, false, time.Unix(7, 0), 0},
+				{11, 3, "I gave you my heart", false, false, time.Unix(8, 0), 0},
+				{12, 3, "but then the very next day", false, false, time.Unix(9, 0), 0},
+				{13, 3, "you gave it away", false, false, time.Unix(10, 0), 0},
+			}),
 			nil,
 			commentForest,
-			func(p data.PennyDB) (data.CommentForest, error) {
+			func(p data.PennyDB) (*data.Page, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				return p.GetPageCommentsById(ctx, 1, data.SortPaginate{})
 			},
@@ -381,7 +424,7 @@ func TestGetPageCommentsById(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		t.Run(testCase.name, testCase.Test)
+		t.Run(testCase.name, testCase.TestForest)
 	}
 }
 
@@ -389,54 +432,52 @@ func TestGetPageComments(t *testing.T) {
 	testCases := []CommentsTestCase{
 		{"MissingPage",
 			nil,
-			nil,
+			sql.ErrNoRows,
 			singleComment,
-			func(p data.PennyDB) (data.CommentForest, error) {
+			func(p data.PennyDB) (*data.Page, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				return p.GetPageComments(ctx, "I do not exist")
 			}},
 		{"SingleComment",
-			[]data.Comment{
-				{1, "pie", false, false, time.Unix(0, 0), 0, nil},
-			},
+			data.NewPage([]data.Comment{{1, 0, "pie", false, false, time.Unix(0, 0), 0}}),
 			nil,
 			singleComment,
-			func(p data.PennyDB) (data.CommentForest, error) {
+			func(p data.PennyDB) (*data.Page, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				return p.GetPageComments(ctx, "apples")
 			}},
 		{"NestedCommentChain",
-			[]data.Comment{
-				{1, "cobbler", false, false, time.Unix(0, 0), 1, nil},
-				{2, "with", false, false, time.Unix(1, 0), 1, nil},
-				{3, "icecream", false, false, time.Unix(2, 0), 0, nil},
-			},
+			data.NewPage([]data.Comment{
+				{1, 0, "cobbler", false, false, time.Unix(0, 0), 1},
+				{2, 1, "with", false, false, time.Unix(1, 0), 1},
+				{3, 2, "icecream", false, false, time.Unix(2, 0), 0},
+			}),
 			nil,
 			nestedCommentChain,
-			func(p data.PennyDB) (data.CommentForest, error) {
+			func(p data.PennyDB) (*data.Page, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				return p.GetPageComments(ctx, "peaches")
 			},
 		},
 		{"CommentForest",
-			[]data.Comment{
-				{1, "first", false, false, time.Unix(0, 0), 2, nil},
-				{2, "second", false, false, time.Unix(1, 0), 1, nil},
-				{3, "last", false, false, time.Unix(2, 0), 4, nil},
-				{4, "letter", false, false, time.Unix(3, 0), 2, nil},
-				{5, "animal", false, false, time.Unix(3, 0), 0, nil},
-				{6, "ammendment", false, false, time.Unix(4, 0), 1, nil},
-				{7, "of the US constitution is the right to bear arms", false, false, time.Unix(5, 0), 0, nil},
-				{8, "of the english alphabet descends from proto-sinatic script", false, false, time.Unix(5, 0), 0, nil},
-				{9, "is an inverted bull", false, false, time.Unix(5, 0), 0, nil},
-				{10, "christmas", false, false, time.Unix(7, 0), 0, nil},
-				{11, "I gave you my heart", false, false, time.Unix(8, 0), 0, nil},
-				{12, "but then the very next day", false, false, time.Unix(9, 0), 0, nil},
-				{13, "you gave it away", false, false, time.Unix(10, 0), 0, nil},
-			},
+			data.NewPage([]data.Comment{
+				{1, 0, "first", false, false, time.Unix(0, 0), 2},
+				{2, 0, "second", false, false, time.Unix(1, 0), 1},
+				{3, 0, "last", false, false, time.Unix(2, 0), 4},
+				{4, 1, "letter", false, false, time.Unix(3, 0), 2},
+				{5, 1, "animal", false, false, time.Unix(3, 0), 0},
+				{6, 2, "ammendment", false, false, time.Unix(4, 0), 1},
+				{7, 6, "of the US constitution is the right to bear arms", false, false, time.Unix(5, 0), 0},
+				{8, 4, "of the english alphabet descends from proto-sinatic script", false, false, time.Unix(5, 0), 0},
+				{9, 4, "is an inverted bull", false, false, time.Unix(5, 0), 0},
+				{10, 3, "christmas", false, false, time.Unix(7, 0), 0},
+				{11, 3, "I gave you my heart", false, false, time.Unix(8, 0), 0},
+				{12, 3, "but then the very next day", false, false, time.Unix(9, 0), 0},
+				{13, 3, "you gave it away", false, false, time.Unix(10, 0), 0},
+			}),
 			nil,
 			commentForest,
-			func(p data.PennyDB) (data.CommentForest, error) {
+			func(p data.PennyDB) (*data.Page, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				return p.GetPageComments(ctx, "the")
 			},
@@ -444,204 +485,53 @@ func TestGetPageComments(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		t.Run(testCase.name, testCase.Test)
-	}
-}
-
-func TestGetPageRootComments(t *testing.T) {
-	testCases := []CommentsTestCase{
-		{"MissingPage",
-			nil,
-			nil,
-			singleComment,
-			func(p data.PennyDB) (data.CommentForest, error) {
-				ctx := context.WithValue(context.Background(), "now", MaxInt64)
-				return p.GetPageRootComments(ctx, "I do not exist", data.SortPaginate{})
-			}},
-		{"SingleComment",
-			[]data.Comment{
-				{1, "pie", false, false, time.Unix(0, 0), 0, nil},
-			},
-			nil,
-			singleComment,
-			func(p data.PennyDB) (data.CommentForest, error) {
-				ctx := context.WithValue(context.Background(), "now", MaxInt64)
-				return p.GetPageRootComments(ctx, "apples", data.SortPaginate{})
-			}},
-		{"NestedCommentChain",
-			[]data.Comment{
-				{1, "cobbler", false, false, time.Unix(0, 0), 1, nil},
-			},
-			nil,
-			nestedCommentChain,
-			func(p data.PennyDB) (data.CommentForest, error) {
-				ctx := context.WithValue(context.Background(), "now", MaxInt64)
-				return p.GetPageRootComments(ctx, "peaches", data.SortPaginate{})
-			},
-		},
-		{"CommentForest",
-			[]data.Comment{
-				{1, "first", false, false, time.Unix(0, 0), 2, nil},
-				{2, "second", false, false, time.Unix(1, 0), 1, nil},
-				{3, "last", false, false, time.Unix(2, 0), 4, nil},
-			},
-			nil,
-			commentForest,
-			func(p data.PennyDB) (data.CommentForest, error) {
-				ctx := context.WithValue(context.Background(), "now", MaxInt64)
-				return p.GetPageRootComments(ctx, "the", data.SortPaginate{})
-			},
-		},
-	}
-
-	for _, testCase := range testCases {
-		t.Run(testCase.name, testCase.Test)
+		t.Run(testCase.name, testCase.TestForest)
 	}
 }
 
 func TestGetCommentsById(t *testing.T) {
 	testCases := []CommentsTestCase{
 		{"NoValidComment",
-			[]data.Comment{{}},
+			nil,
 			sql.ErrNoRows,
 			singleComment,
-			func(p data.PennyDB) (data.CommentForest, error) {
+			func(p data.PennyDB) (*data.Page, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				comment, err := p.GetCommentById(ctx, 100)
-				return []data.Comment{comment}, err
+				if err != nil {
+					return nil, err
+				}
+				return data.NewPage([]data.Comment{comment}), err
 			}},
 		{"ValidComment",
-			[]data.Comment{{1, "pie", false, false, time.Unix(0, 0), 0, nil}},
+			data.NewPage([]data.Comment{{1, 0, "pie", false, false, time.Unix(0, 0), 0}}),
 			nil,
 			singleComment,
-			func(p data.PennyDB) (data.CommentForest, error) {
+			func(p data.PennyDB) (*data.Page, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				comment, err := p.GetCommentById(ctx, 1)
-				return []data.Comment{comment}, err
+				return data.NewPage([]data.Comment{comment}), err
 			}},
 		{"HiddenComment",
-			[]data.Comment{{1, "pie", true, false, time.Unix(0, 0), 0, nil}},
+			data.NewPage([]data.Comment{{1, 0, "pie", true, false, time.Unix(0, 0), 0}}),
 			nil,
 			hiddenComment,
-			func(p data.PennyDB) (data.CommentForest, error) {
+			func(p data.PennyDB) (*data.Page, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				comment, err := p.GetCommentById(ctx, 1)
-				return []data.Comment{comment}, err
+				return data.NewPage([]data.Comment{comment}), err
 			},
 		},
 		{"DeletedComment",
-			[]data.Comment{{1, "", false, true, time.Unix(0, 0), 0, nil}},
+			data.NewPage([]data.Comment{{1, 0, "", false, true, time.Unix(0, 0), 0}}),
 			nil,
 			deletedComment,
-			func(p data.PennyDB) (data.CommentForest, error) {
+			func(p data.PennyDB) (*data.Page, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
 				comment, err := p.GetCommentById(ctx, 1)
-				return []data.Comment{comment}, err
+				return data.NewPage([]data.Comment{comment}), err
 			},
 		},
-	}
-
-	for _, testCase := range testCases {
-		t.Run(testCase.name, testCase.Test)
-	}
-}
-
-func TestGetCommentChildren(t *testing.T) {
-	testCases := []CommentsTestCase{
-		{"NoValidComment",
-			[]data.Comment{},
-			nil,
-			singleComment,
-			func(p data.PennyDB) (data.CommentForest, error) {
-				comment := data.Comment{}
-				ctx := context.WithValue(context.Background(), "now", MaxInt64)
-				err := p.GetCommentChildren(ctx, &comment, data.SortPaginate{})
-				return comment.Children, err
-			},
-		},
-		{"NoChildren", // a great tmg song
-			[]data.Comment{},
-			nil,
-			singleComment,
-			func(p data.PennyDB) (data.CommentForest, error) {
-				comment := data.Comment{1, "pie", false, false, time.Unix(0, 0), 0, nil}
-				ctx := context.WithValue(context.Background(), "now", MaxInt64)
-				err := p.GetCommentChildren(ctx, &comment, data.SortPaginate{})
-				return comment.Children, err
-			},
-		},
-		{"Children",
-			[]data.Comment{
-				{10, "christmas", false, false, time.Unix(7, 0), 0, nil},
-				{11, "I gave you my heart", false, false, time.Unix(8, 0), 0, nil},
-				{12, "but then the very next day", false, false, time.Unix(9, 0), 0, nil},
-				{13, "you gave it away", false, false, time.Unix(10, 0), 0, nil},
-			},
-			nil,
-			commentForest,
-			func(p data.PennyDB) (data.CommentForest, error) {
-				comment := data.Comment{3, "last", false, false, time.Unix(2, 0), 4, nil}
-				ctx := context.WithValue(context.Background(), "now", MaxInt64)
-				err := p.GetCommentChildren(ctx, &comment, data.SortPaginate{})
-				return comment.Children, err
-			},
-		},
-	}
-
-	for _, testCase := range testCases {
-		t.Run(testCase.name, testCase.Test)
-	}
-}
-
-func TestBFSGetCommentChildren(t *testing.T) {
-	testCases := []CommentsTestCase{
-		{"NoChildren",
-			[]data.Comment{},
-			nil,
-			singleComment,
-			func(p data.PennyDB) (data.CommentForest, error) {
-				comment := data.Comment{1, "pie", false, false, time.Unix(0, 0), 0, nil}
-				ctx := context.WithValue(context.Background(), "now", MaxInt64)
-				err := p.BFSGetCommentChildren(ctx, &comment, 200, data.SortPaginate{})
-				return comment.Children, err
-			}},
-		{"FullDepth",
-			[]data.Comment{
-				{1, "first", false, false, time.Unix(0, 0), 2, []data.Comment{
-					{4, "letter", false, false, time.Unix(3, 0), 2, []data.Comment{
-						{8, "of the english alphabet descends from proto-sinatic script", false, false, time.Unix(5, 0), 0, nil},
-						{9, "is an inverted bull", false, false, time.Unix(5, 0), 0, nil},
-					}},
-					{5, "animal", false, false, time.Unix(3, 0), 0, nil},
-				}},
-				{2, "second", false, false, time.Unix(1, 0), 1, []data.Comment{
-					{6, "ammendment", false, false, time.Unix(4, 0), 1, []data.Comment{
-						{7, "of the US constitution is the right to bear arms", false, false, time.Unix(5, 0), 0, nil}}}}},
-				{3, "last", false, false, time.Unix(2, 0), 4, []data.Comment{
-					{10, "christmas", false, false, time.Unix(7, 0), 0, nil},
-					{11, "I gave you my heart", false, false, time.Unix(8, 0), 0, nil},
-					{12, "but then the very next day", false, false, time.Unix(9, 0), 0, nil},
-					{13, "you gave it away", false, false, time.Unix(10, 0), 0, nil},
-				}},
-			},
-			nil,
-			commentForest,
-			func(p data.PennyDB) (data.CommentForest, error) {
-				comments := []data.Comment{
-					{1, "first", false, false, time.Unix(0, 0), 2, nil},
-					{2, "second", false, false, time.Unix(1, 0), 1, nil},
-					{3, "last", false, false, time.Unix(2, 0), 4, nil},
-				}
-				ctx := context.WithValue(context.Background(), "now", MaxInt64)
-				for i := range comments {
-					if err := p.BFSGetCommentChildren(ctx, &comments[i], 100, data.SortPaginate{}); err != nil {
-						return comments, err
-					}
-				}
-				return comments, nil
-			},
-		},
-		// {}, // limited depth
 	}
 
 	for _, testCase := range testCases {
