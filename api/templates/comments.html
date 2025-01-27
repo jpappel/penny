@@ -1,0 +1,9 @@
+<div class="pennyComments">
+    <h2>{{ .Page.Url }}</h2>
+    <span>Updated <time datetime="{{ .Page.UpdateTime }}">{{ .Page.UpdateTime }}</time></span>
+    <b>Total Comments: {{ .Page.Len }}</b>
+    <hr>
+    {{- range .Comments -}}
+    {{ template "comment.html" . }}
+    {{- end -}}
+</div>

@@ -55,7 +55,7 @@ func (c Comment) Hash() string {
 }
 
 func (p *Page) Len() int {
-	return len(p.Relations.Nodes)
+	return len(p.Relations.Nodes) - 1
 }
 
 func (p *Page) BFS() iter.Seq[int] {

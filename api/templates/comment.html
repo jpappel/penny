@@ -1,0 +1,14 @@
+<div id="pennyComment_{{.Id}}" class="pennyComment">
+    <h2><a href="#pennyComment_{{ .Id }}">> {{ .Id }}</a></h2>
+    <div>{{ if .Hidden }}Hidden {{ end }}{{ if .Deleted }}Deleted{{ end }}</div>
+    <time datetime="">{{ .Posted.Local }}</time>
+    <hr>
+    {{ with .ParentId }}
+    <a href="#pennyComment_{{ . }}">>> {{ . }}</a>
+    {{ end }}
+    <p>{{ .Content }}</p>
+    <hr>
+    <details>
+        <summary>Children {{ .NumChildren }}</summary>
+    </details>
+</div>
