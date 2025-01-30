@@ -6,7 +6,15 @@
     {{ with .ParentId }}
     <a href="#pennyComment_{{ . }}">>> {{ . }}</a>
     {{ end }}
-    <p>{{ .Content }}</p>
+    <p class="pennyContent">
+    {{- if .Deleted -}}
+        <i>Deleted</i>
+    {{- else -}}
+        {{- if .Hidden -}}<details><summary>Hidden</summary>{{- end -}}
+        {{ .Content }}
+        {{- if .Hidden -}}</details>{{- end -}}
+    {{- end -}}
+    </p>
     <hr>
     <details>
         <summary>Children {{ .NumChildren }}</summary>

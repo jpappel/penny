@@ -1,0 +1,23 @@
+<div>
+    {{- with .User -}}
+    <p>Posting As {{ .Name }}</p>
+    <form name="postComment" method="post">
+        <fieldset>
+            <label for="pennyReplyTo">Reply</label>
+            <input type="text" inputmode="numeric" id="pennyReplyTo" name="parentId" readonly />
+            <input type="reset" value="Reset" />
+        </fieldset>
+        <label for="pennyCommentText">Comment</label>
+        <textarea id="pennyCommentText" name="commentText" placeholder="Enter your comment here" required></textarea>
+        <input type="submit" value="Submit" />
+    </form>
+    <a href=""><button>Sign Out</button></a>
+    {{- else -}}
+    <div>
+        <p>You need to be signed in to comment</p>
+        {{- range .Providers -}}
+        <a href="{{ .Url }}"><img />{{ .Name }}</a>
+        {{- end -}}
+    </div>
+    {{- end -}}
+</div>

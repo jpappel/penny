@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func (p PennyDB) PostComment(ctx context.Context, page string, user string, comment Comment, parentId *int64) (int, error) {
+func (p PennyDB) PostComment(ctx context.Context, page string, user string, comment string, parentId *int64) (int, error) {
 	tx, err := p.Db.BeginTx(ctx, nil)
 	if err != nil {
 		panic(err)
@@ -16,6 +16,7 @@ func (p PennyDB) PostComment(ctx context.Context, page string, user string, comm
 	err = tx.QueryRowContext(ctx, "SELECT id FROM Users WHERE email = ?", user).Scan(&userId)
 	if err == sql.ErrNoRows {
 		tx.Rollback()
+        // TODO: gracefully handle no existing user
 		return -1, err
 	} else if err != nil {
 		tx.Rollback()
@@ -25,6 +26,7 @@ func (p PennyDB) PostComment(ctx context.Context, page string, user string, comm
 	var pageId int64
 	err = tx.QueryRowContext(ctx, "SELECT id FROM Pages WHERE url = ?", page).Scan(&pageId)
 	if err == sql.ErrNoRows {
+        // TODO: gracefully handle no existing page
 		tx.Rollback()
 		return -1, err
 	} else if err != nil {
@@ -36,7 +38,7 @@ func (p PennyDB) PostComment(ctx context.Context, page string, user string, comm
 	result, err := tx.ExecContext(ctx, `INSERT INTO Comments
     (userId, pageId, postedTime, content)
     VALUES(?,?,?,?)
-    `, userId, pageId, now, comment.Content)
+    `, userId, pageId, now, comment)
 	if err != nil {
 		tx.Rollback()
 		panic(err)
