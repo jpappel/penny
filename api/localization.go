@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"time"
 
 	"golang.org/x/text/language"
 )
@@ -14,8 +13,4 @@ func detectLocale(r *http.Request) language.Tag {
 	}
 
 	return tags[0]
-}
-
-func localizeTimestamp(epochTime int64, timezone string) (time.Time, error) {
-	return time.Time{}, nil
 }

@@ -2,9 +2,8 @@ package data_test
 
 import (
 	"fmt"
-	"iter"
-	"slices"
 	"testing"
+	"time"
 
 	"github.com/jpappel/penny/data"
 )
@@ -34,100 +33,48 @@ func (tc CommentsTestCase) Test(t *testing.T) {
 		t.Fatalf("Recieved nil pages: expected %p, result %p\n", tc.expected, p)
 	}
 
-	pNext, pStop := iter.Pull(p.BFS())
-	eNext, eStop := iter.Pull(tc.expected.BFS())
-
-	pId, pMore := pNext()
-	eId, eMore := eNext()
-	for pMore && eMore {
-		if pId != eId {
-			t.Errorf("Recieved a diffent id than expected: wanted %d got %d\n", eId, pId)
-		}
-		pId, pMore = pNext()
-		eId, eMore = eNext()
-	}
-	pStop()
-	eStop()
-
-	if t.Failed() {
-		t.Log("Expected:\n\n", tc.expected, "\n")
-		t.Log("Recieved:\n\n", p)
+	pLen, eLen := p.Len(), tc.expected.Len()
+	minLen := min(pLen, eLen)
+	if pLen != eLen {
+		t.Errorf("Received different number of comments: wanted %d, got %d\n", eLen, pLen)
+		t.Logf("Comparing up to %d comments\n", minLen)
 	}
 
-	pIds := make([]int, 0, p.Len())
-	eIds := make([]int, 0, tc.expected.Len())
+	for i := range minLen {
+		c, e := p.Comments[i], tc.expected.Comments[i]
+		if cHash, eHash := c.Hash(), e.Hash(); cHash != eHash {
+			t.Errorf("Recieved a different comment hash than expected: wanted %s, got %s\n", eHash, cHash)
 
-	p.Comments.Range(func(k any, _ any) bool {
-		id, ok := k.(int)
-		if !ok {
-			t.Fatal("Recieved unexpected key in comments map", k)
-		}
-		pIds = append(pIds, id)
-		return true
-	})
-	tc.expected.Comments.Range(func(k any, _ any) bool {
-		id, ok := k.(int)
-		if !ok {
-			t.Fatal("Recieved unexpected key in expected comments map", k)
-		}
-		eIds = append(eIds, id)
-		return true
-	})
+			if c.Id != e.Id {
+				t.Logf("Different Id's: wanted %d, got %d\n", e.Id, c.Id)
+			}
+			if c.Deleted != e.Deleted {
+				t.Logf("Different Deletion status: wanted %t, got %t\n", e.Deleted, c.Deleted)
+			}
+			if c.Hidden != e.Hidden {
+				t.Logf("Different Hidden status: wanted %t, got %t\n", e.Hidden, c.Hidden)
+			}
+			if !c.Posted.Equal(e.Posted) {
+				t.Logf("Different Posted Time: wanted %v, got %v\n", e.Posted, c.Posted)
+			}
 
-	slices.Sort(pIds)
-	slices.Sort(eIds)
-	for i := range pIds {
-		if pIds[i] != eIds[i] {
-			t.Fatalf("Recieved a different id than expected: wanted %d got %d\n", eIds[i], pIds[i])
+			cReplies, eReplies := len(c.Replies), len(e.Replies)
+			minReplies := min(cReplies, eReplies)
+			if cReplies != eReplies {
+				t.Logf("Different Number of replies: wanted %d, got %d\n", eReplies, cReplies)
+				t.Logf("Comparing up to %d replies\n", minReplies)
+			}
+			for j := range minReplies {
+				if c.Replies[j] != e.Replies[j] {
+					t.Logf("Different reply than expected: wanted %d, got %d\n", e.Replies[j], c.Replies[j])
+				}
+			}
+
+			if c.Content != e.Content {
+				t.Logf("Different Content's:\nwanted:\n%s\n<END>\ngot:\n%s\n<END>\n", e.Content, c.Content)
+			}
 		}
 	}
-
-	eHashes := make(map[int]string, len(eIds))
-	tc.expected.Comments.Range(func(k any, v any) bool {
-		id := k.(int)
-		comment, ok := v.(data.Comment)
-		if !ok {
-			t.Fatal("Recieved unexpected value in expected comments map", v)
-		}
-
-		eHashes[id] = comment.Hash()
-		return true
-	})
-	p.Comments.Range(func(k any, v any) bool {
-		id := k.(int)
-		comment, ok := v.(data.Comment)
-		if !ok {
-			t.Fatal("Recieved unexpected value in comments map", v)
-		}
-
-		if cHash, eHash := comment.Hash(), eHashes[id]; cHash != eHash {
-			t.Errorf("Recieved a different comment hash than expected: id=%d wanted %s, got %s\n", id, eHash, cHash)
-			e, _ := tc.expected.Comments.Load(id)
-			eC := e.(data.Comment)
-			if comment.ParentId != eC.ParentId {
-				t.Logf("\tDiffernt ParentId's: wanted %d, got %d\n", comment.ParentId, eC.ParentId)
-			}
-			if comment.NumChildren != eC.NumChildren {
-				t.Logf("\tDiffernt NumChildren's: wanted %d, got %d\n", comment.NumChildren, eC.NumChildren)
-			}
-			if comment.Deleted != eC.Deleted {
-				t.Logf("\tDiffernt Deletion status: wanted %t, got %t\n", comment.Deleted, eC.Deleted)
-			}
-			if comment.Hidden != eC.Hidden {
-				t.Logf("\tDiffernt Hidden status: wanted %t, got %t\n", comment.Hidden, eC.Hidden)
-			}
-			if !comment.Posted.Equal(eC.Posted) {
-				t.Logf("\tDifferent Posted Time: wanted %v, got %v\n", comment.Posted, eC.Posted)
-			}
-			if comment.Content != eC.Content {
-				t.Logf("\tDifferent Content's:\nwanted:\n%s\n<END>\ngot:\n%s\n<END>", comment.Content, eC.Content)
-			}
-			// t.Log("Recieved\n", comment)
-			// t.Log("\nExpected\n", eComment)
-		}
-
-		return true
-	})
 }
 
 // single comment with a single user
@@ -154,17 +101,14 @@ func singleComment(connStr string) data.PennyDB {
 		panic(err)
 	}
 
-	_, err = tx.Exec("INSERT INTO Relations(parentId, childId, depth) VALUES (NULL, 1, 0)")
-	if err != nil {
-		panic(err)
-	}
-
 	if err := tx.Commit(); err != nil {
 		panic(err)
 	}
 
 	return pdb
 }
+
+var singleCommentPage *data.Page
 
 // singleComment but hidden
 func hiddenComment(connStr string) data.PennyDB {
@@ -240,11 +184,10 @@ func nestedCommentChain(connStr string) data.PennyDB {
 	}
 
 	_, err = tx.Exec(`
-    INSERT INTO Relations(parentId, childId, depth)
-    VALUES (?,?,?),(?,?,?),(?,?,?)`,
-		nil, 1, 0,
-		1, 2, 1,
-		2, 3, 2)
+    INSERT INTO Replies(parentId, childId)
+    VALUES (?,?),(?,?)`,
+		1, 2,
+		2, 3)
 	if err != nil {
 		panic(err)
 	}
@@ -255,6 +198,8 @@ func nestedCommentChain(connStr string) data.PennyDB {
 
 	return pdb
 }
+
+var nestedCommentChainPage *data.Page
 
 // multiple root comments from multiple authors
 /*
@@ -328,14 +273,7 @@ func commentForest(connStr string) data.PennyDB {
 	}
 	stmt.Close()
 
-	_, err = tx.Exec(`
-    INSERT INTO Relations(parentId, childId, depth)
-    VALUES (NULL,?,0), (NULL,?,0), (NULL,?,0)`, 1, 2, 3)
-	if err != nil {
-		panic(err)
-	}
-
-	stmt, err = tx.Prepare("INSERT INTO Relations(parentId, childId, depth) VALUES (?,?,?)")
+	stmt, err = tx.Prepare("INSERT INTO Replies(parentId, childId) VALUES (?,?)")
 	if err != nil {
 		panic(err)
 	}
@@ -343,14 +281,13 @@ func commentForest(connStr string) data.PennyDB {
 	relations := []struct {
 		parent int
 		self   int
-		depth  int
 	}{
-		{1, 4, 1}, {1, 5, 1}, {4, 8, 2}, {4, 9, 2},
-		{2, 6, 1}, {6, 7, 2},
-		{3, 10, 1}, {3, 11, 1}, {3, 12, 1}, {3, 13, 1},
+		{1, 4}, {1, 5}, {4, 8}, {4, 9},
+		{2, 6}, {6, 7},
+		{3, 10}, {3, 11}, {3, 12}, {3, 13},
 	}
 	for _, r := range relations {
-		_, err = stmt.Exec(r.parent, r.self, r.depth)
+		_, err = stmt.Exec(r.parent, r.self)
 		if err != nil {
 			panic(err)
 		}
@@ -362,4 +299,42 @@ func commentForest(connStr string) data.PennyDB {
 	}
 
 	return pdb
+}
+
+var commentForestPage *data.Page
+
+func init() {
+	singleCommentPage = &data.Page{
+		Url:        "apples",
+		UpdateTime: time.Unix(MaxInt64, 0),
+		Comments:   []data.Comment{{1, "pie", false, false, time.Unix(0, 0), nil}},
+	}
+
+	nestedCommentChainPage = &data.Page{
+		Url:        "peaches",
+		UpdateTime: time.Unix(MaxInt64, 0),
+		Comments: []data.Comment{
+			{1, "cobbler", false, false, time.Unix(0, 0), []int{2}},
+			{2, "with", false, false, time.Unix(1, 0), []int{3}},
+			{3, "icecream", false, false, time.Unix(2, 0), nil},
+		}}
+
+	commentForestPage = &data.Page{
+		Url:        "the",
+		UpdateTime: time.Unix(MaxInt64, 0),
+		Comments: []data.Comment{
+			{Id: 1, Content: "first", Posted: time.Unix(0, 0), Replies: []int{4, 5}},
+			{Id: 2, Content: "second", Posted: time.Unix(1, 0), Replies: []int{6}},
+			{Id: 3, Content: "last", Posted: time.Unix(2, 0), Replies: []int{10, 11, 12, 13}},
+			{Id: 4, Content: "letter", Posted: time.Unix(3, 0), Replies: []int{8, 9}},
+			{Id: 5, Content: "animal", Posted: time.Unix(3, 0), Replies: nil},
+			{Id: 6, Content: "ammendment", Posted: time.Unix(4, 0), Replies: []int{7}},
+			{Id: 7, Content: "of the US constitution is the right to bear arms", Posted: time.Unix(5, 0), Replies: nil},
+			{Id: 8, Content: "of the english alphabet descends from proto-sinatic script", Posted: time.Unix(5, 0), Replies: nil},
+			{Id: 9, Content: "is an inverted bull", Posted: time.Unix(5, 0), Replies: nil},
+			{Id: 10, Content: "christmas", Posted: time.Unix(7, 0), Replies: nil},
+			{Id: 11, Content: "I gave you my heart", Posted: time.Unix(8, 0), Replies: nil},
+			{Id: 12, Content: "but then the very next day", Posted: time.Unix(9, 0), Replies: nil},
+			{Id: 13, Content: "you gave it away", Posted: time.Unix(10, 0), Replies: nil},
+		}}
 }

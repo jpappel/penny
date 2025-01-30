@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -19,33 +20,21 @@ func GetComments(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("fetching coments for page", slog.Any("pageUrl", pageUrl))
 
-	ctx := context.WithValue(r.Context(), "now", time.Now().UTC().Unix())
+	ctx := context.WithValue(r.Context(), "now", time.Now().Unix())
 
 	page, err := pdb.GetPageComments(ctx, pageUrl)
-	if err != nil {
+	if err == data.ErrNoPage {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprintf(w, "<h1>Error 404</h1><p>Comments for page %s not found</p>\n", pageUrl)
+		return
+	} else if err != nil {
 		slog.ErrorContext(r.Context(), "Failed to get Page Comments", slog.Any("error", err))
 		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintln(w, "<h1>Internal Server Error</h1>")
 		return
 	}
 
-	ch := make(chan data.Comment, 32)
-	go func() {
-		defer close(ch)
-		page.Comments.Range(func(k any, v any) bool {
-			commment, ok := v.(data.Comment)
-			if !ok {
-				return false
-			}
-
-			ch <- commment
-			return true
-		})
-	}()
-
-	err = tmpls.ExecuteTemplate(w, "comments.html", struct {
-		Page     *data.Page
-		Comments chan data.Comment
-	}{page, ch})
+	err = tmpls.ExecuteTemplate(w, "comments.html", page)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "An error occured while executing template", slog.Any("error", err))
 	}

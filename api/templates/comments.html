@@ -1,7 +1,7 @@
 <div class="pennyComments">
-    <h2>{{ .Page.Url }}</h2>
-    <span>Updated <time datetime="{{ .Page.UpdateTime }}">{{ .Page.UpdateTime }}</time></span>
-    <b>Total Comments: {{ .Page.Len }}</b>
+    <h2>{{ .Url }}</h2>
+    <span>Updated <time datetime="{{ .UpdateTime.Format "2006-01-02T15:04:05-07:00" }}">{{ .UpdateTime.Format "2006-01-02 16:04:05 MST" }}</time></span>
+    <b>Total Comments: {{ .Len }}</b>
     <hr>
     {{- range .Comments -}}
     {{ template "comment.html" . }}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"time"
 )
 
@@ -16,18 +15,13 @@ type SortPaginate struct {
 }
 
 // Parse a comment from a sql row
-func parseComment(result *sql.Rows, unixTime int64) (*Comment, error) {
+func parseComment(ctx context.Context, row *sql.Rows, stmt *sql.Stmt, unixTime int64) (*Comment, error) {
 	comment := new(Comment)
 	var hiddenTime sql.NullInt64
 	var deletedTime sql.NullInt64
-	var parentId sql.NullInt64
 	var postedTime int64
-	if err := result.Scan(&comment.Id, &parentId, &hiddenTime, &deletedTime, &postedTime, &comment.Content, &comment.NumChildren); err != nil {
+	if err := row.Scan(&comment.Id, &hiddenTime, &deletedTime, &postedTime, &comment.Content); err != nil {
 		return nil, err
-	}
-
-	if parentId.Valid {
-		comment.ParentId = int(parentId.Int64)
 	}
 
 	if hiddenTime.Valid {
@@ -39,30 +33,30 @@ func parseComment(result *sql.Rows, unixTime int64) (*Comment, error) {
 	}
 	comment.Posted = time.Unix(postedTime, 0)
 
+	result, err := stmt.QueryContext(ctx, comment.Id)
+	if err == sql.ErrNoRows {
+		return comment, nil
+	} else if err != nil {
+		return comment, err
+	}
+
+	var replyId int
+	for result.Next() {
+		if err := result.Scan(&replyId); err != nil {
+			// TODO: handle succesful comment parse but incorrect replies parse
+			return comment, err
+		}
+		comment.Replies = append(comment.Replies, replyId)
+	}
+
 	return comment, nil
 }
 
-// Creates a sorted and or paginated version of a query
-func (sp SortPaginate) update(query string) string {
-	newQuery := query
-
-	if sp.Order == "id" || sp.Order == "postedTime" {
-		orderStr := "ASC"
-		if sp.Descending {
-			orderStr = "DESC"
-		}
-		newQuery = fmt.Sprintf("%s\nORDER BY %s %s", newQuery, sp.Order, orderStr)
+func (p PennyDB) GetPageCommentsById(ctx context.Context, pageId int) (*Page, error) {
+	now, ok := ctx.Value("now").(int64)
+	if !ok {
+		return nil, errors.New("Missing `now` in context")
 	}
-
-	if sp.Limit > 0 && sp.Offset >= 0 {
-		newQuery = fmt.Sprintf("%s\nLIMIT %d\nOFFSET %d", newQuery, sp.Limit, sp.Offset)
-	}
-
-	return newQuery
-}
-
-func (p PennyDB) GetPageCommentsById(ctx context.Context, pageId int, sp SortPaginate) (*Page, error) {
-	now := ctx.Value("now").(int64)
 
 	var pageUrl string
 	err := p.Db.QueryRowContext(ctx, "SELECT url FROM Pages WHERE id = ?", pageId).Scan(&pageUrl)
@@ -70,12 +64,11 @@ func (p PennyDB) GetPageCommentsById(ctx context.Context, pageId int, sp SortPag
 		return nil, err
 	}
 
-	query := sp.update(`
-    SELECT id, parentId, hiddenTime, deletedTime, postedTime, content, children
+	query := `
+    SELECT id, hiddenTime, deletedTime, postedTime, content
     FROM Comments
-    JOIN Descendants ON Comments.id = Descendants.commentId
-    JOIN Relations ON Comments.id = Relations.childId
-    WHERE pageId = ?`)
+    WHERE pageId = ?
+    ORDER BY postedTime`
 
 	result, err := p.Db.QueryContext(ctx, query, pageId)
 	if err != nil {
@@ -83,18 +76,26 @@ func (p PennyDB) GetPageCommentsById(ctx context.Context, pageId int, sp SortPag
 	}
 	defer result.Close()
 
-	page := NewPage(nil)
+	stmt, err := p.Db.PrepareContext(ctx, `
+    SELECT childId
+    FROM Replies
+    WHERE parentId = ?
+    ORDER BY childId`)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+
+	page := new(Page)
 	page.Url = pageUrl
-	page.UpdateTime = now
+	page.UpdateTime = time.Unix(now, 0)
 
 	for result.Next() {
-		comment, err := parseComment(result, now)
+		comment, err := parseComment(ctx, result, stmt, now)
 		if err != nil {
 			return nil, err
 		}
-
-		page.Comments.Store(comment.Id, *comment)
-		page.Relations.Append(comment.ParentId, comment.Id)
+		page.Comments = append(page.Comments, *comment)
 	}
 
 	return page, nil
@@ -107,52 +108,65 @@ func (p PennyDB) GetPageComments(ctx context.Context, pageUrl string) (*Page, er
 	}
 
 	result, err := p.Db.QueryContext(ctx, `
-    SELECT Comments.id, parentId, hiddenTime, deletedTime, postedTime, content, children
+    SELECT Comments.id, hiddenTime, deletedTime, postedTime, content
     FROM Comments
     JOIN Pages ON Comments.pageId = Pages.id
-    JOIN Relations ON Comments.id = Relations.childId
-    JOIN Descendants ON Comments.id = Descendants.commentId
-    WHERE url = ?`, pageUrl)
+    WHERE url = ?
+    ORDER BY postedTime`, pageUrl)
 	if err != nil {
 		return nil, err
 	}
 	defer result.Close()
 
-	page := NewPage(nil)
+	page := new(Page)
 	page.Url = pageUrl
-	page.UpdateTime = now
+	page.UpdateTime = time.Unix(now, 0)
 
-    // HACK: workaround for weired behavior in libsql driver
-    //       driver from 20241221181756 fails return correct error on empty resultset
+	stmt, err := p.Db.PrepareContext(ctx, `
+    SELECT childId
+    FROM Replies
+    WHERE parentId = ?
+    ORDER BY childId`)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+
+	// HACK: workaround for weired behavior in libsql driver
+	//       driver from 20241221181756 fails return correct error on empty resultset
 	hasRows := false
 	for result.Next() {
 		hasRows = true
-		comment, err := parseComment(result, now)
+		comment, err := parseComment(ctx, result, stmt, now)
 		if err != nil {
 			return nil, err
 		}
-
-		page.Comments.Store(comment.Id, *comment)
-		page.Relations.Append(comment.ParentId, comment.Id)
+		page.Comments = append(page.Comments, *comment)
 	}
 
 	if !hasRows {
-		return nil, sql.ErrNoRows
+		return nil, ErrNoPage
 	}
 
 	return page, nil
 }
 
 func (p PennyDB) GetCommentById(ctx context.Context, commentId int) (Comment, error) {
-	now := ctx.Value("now").(int64)
-	row := p.Db.QueryRowContext(ctx, `SELECT id, hiddenTime, deletedTime, postedTime, content, children
-    FROM Comments JOIN Descendants ON Comments.id = Descendants.commentId WHERE id = ?`, commentId)
+	now, ok := ctx.Value("now").(int64)
+	if !ok {
+		return Comment{}, errors.New("Missing `now` in context")
+	}
+
+	row := p.Db.QueryRowContext(ctx, `
+    SELECT id, hiddenTime, deletedTime, postedTime, content
+    FROM Comments
+    WHERE id = ?`, commentId)
 
 	comment := Comment{}
 	var hiddenTime sql.NullInt64
 	var deletedTime sql.NullInt64
 	var postedTime int64
-	if err := row.Scan(&comment.Id, &hiddenTime, &deletedTime, &postedTime, &comment.Content, &comment.NumChildren); err != nil {
+	if err := row.Scan(&comment.Id, &hiddenTime, &deletedTime, &postedTime, &comment.Content); err != nil {
 		return Comment{}, err
 	}
 
@@ -164,6 +178,25 @@ func (p PennyDB) GetCommentById(ctx context.Context, commentId int) (Comment, er
 		comment.Deleted = deletedTime.Int64 < now
 	}
 	comment.Posted = time.Unix(postedTime, 0)
+
+	result, err := p.Db.QueryContext(ctx, `
+    SELECT childId
+    FROM Replies
+    WHERE parentId = ?
+    ORDER BY childId`)
+	if err == sql.ErrNoRows {
+		return comment, nil
+	} else if err != nil {
+		return Comment{}, err
+	}
+
+	var replyId int
+	for result.Next() {
+		if err := result.Scan(&replyId); err != nil {
+			return Comment{}, err
+		}
+		comment.Replies = append(comment.Replies, replyId)
+	}
 
 	return comment, nil
 }

@@ -66,57 +66,14 @@ func initComments(db *sql.DB) {
 	}
 }
 
-func initRelations(db *sql.DB) {
-	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS Relations(
-        parentId INTEGER,
-        childId INTEGER UNIQUE,
-        depth INTEGER NOT NULL,
+func initReplies(db *sql.DB) {
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS Replies(
+        id INTEGER PRIMARY KEY,
+        parentId INTEGER NOT NULL,
+        childId INTEGER NOT NULL,
         FOREIGN KEY(parentId) REFERENCES Comments(id),
         FOREIGN KEY(childId) REFERENCES Comments(id)
     )`)
-	if err != nil {
-		panic(err)
-	}
-
-	_, err = db.Exec(`CREATE VIEW IF NOT EXISTS Parents AS
-    WITH RECURSIVE parents(startId, parentId, childId) AS (
-         SELECT childId, parentId, childId
-         FROM Relations
-         UNION ALL
-         SELECT parents.startId, Relations.parentId, Relations.childId
-         FROM Relations
-         JOIN parents ON Relations.childId = parents.parentId
-         )
-    SELECT startId AS rootId, childId as commentId FROM parents WHERE parentId IS NULL
-    `)
-	if err != nil {
-		panic(err)
-	}
-
-	_, err = db.Exec(`CREATE VIEW IF NOT EXISTS Descendants AS
-    WITH RECURSIVE descendants(startId, childId) AS (
-        SELECT childId, childId
-        FROM Relations
-        UNION ALL
-        SELECT descendants.startId, Relations.childId
-        FROM Relations
-        JOIN descendants ON Relations.parentId = descendants.childId
-    )
-    SELECT
-        Comments.id AS commentId,
-        COALESCE(descendants.descendantCount, 0) AS descendants,
-        COALESCE(children.childCount, 0) AS children
-    FROM Comments
-    LEFT JOIN (
-        SELECT startId AS commentId, COUNT(*) - 1 AS descendantCount
-        FROM descendants
-        GROUP BY startId
-    ) descendants ON Comments.id = descendants.commentId
-    LEFT JOIN (
-        SELECT parentId AS commentId, COUNT(childId) AS childCount
-        FROM Relations
-        GROUP BY parentId
-    ) children ON Comments.id = children.commentId`)
 	if err != nil {
 		panic(err)
 	}
@@ -126,7 +83,7 @@ func InitDB(db *sql.DB) {
 	initUsers(db)
 	initPages(db)
 	initComments(db)
-	initRelations(db)
+	initReplies(db)
 }
 
 func New(connStr string) PennyDB {
