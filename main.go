@@ -11,14 +11,17 @@ import (
 
 	"github.com/jpappel/penny/api"
 	"github.com/jpappel/penny/data"
+	"github.com/jpappel/penny/text"
 	"golang.org/x/oauth2"
 )
 
 type Config struct {
-	RenderMD     bool     `json:"render_markdown"`
-	Providers    []string `json:"providers"`
-	EnvFilename  string   `json:"env_file"`
-	oauthConfigs map[string]oauth2.Config
+	RenderMD       bool     `json:"render_markdown"`
+	Providers      []string `json:"providers"`
+	EnvFilename    string   `json:"env_file"`
+	EnabledFilters []string `json:"filters"`
+	filters        []text.Filterer
+	oauthConfigs   map[string]oauth2.Config
 }
 
 // Set env vars to values in a file
@@ -97,6 +100,16 @@ func parseConfig(filename string) Config {
 		cfg.oauthConfigs[val] = oauth2.Config{}
 	}
 
+	for _, filterName := range cfg.EnabledFilters {
+		filter, ok := text.AvailableFilters[filterName]
+		if !ok {
+			slog.Error("Invalid Filter", slog.String("filterName", filterName))
+			panic(fmt.Sprint("No filter:", filterName))
+		}
+
+		cfg.filters = append(cfg.filters, filter)
+	}
+
 	return cfg
 }
 
@@ -106,7 +119,7 @@ func main() {
 	const PORT = 8080
 	addr := fmt.Sprintf("%s:%d", HOSTNAME, PORT)
 
-	parseConfig("config.json")
+	// config := parseConfig("config.json")
 
 	mux := api.NewMux()
 

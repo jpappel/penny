@@ -55,7 +55,7 @@ func TestGetPageComments(t *testing.T) {
 	testCases := []CommentsTestCase{
 		{"MissingPage",
 			nil,
-			sql.ErrNoRows,
+			data.ErrNoPage,
 			singleComment,
 			func(p data.PennyDB) (*data.Page, error) {
 				ctx := context.WithValue(context.Background(), "now", MaxInt64)
@@ -146,3 +146,7 @@ func TestGetPageComments(t *testing.T) {
 // 		t.Run(testCase.name, testCase.Test)
 // 	}
 // }
+
+func TestGetPageInfos(t *testing.T) {
+    // TODO: implement test
+}

@@ -1,0 +1,15 @@
+<div class="pennyPages">
+    <h2>Active Pages</h2>
+    <ul>
+        {{- range . -}}
+        <li>
+            <a href="/penny/comments/{{ .Url }}">
+            <h3>{{ .Url }}</h3>
+            <span>Comments {{ if .Open }}Open{{ else }}Closed{{ end }}</span>
+            <span>{{ .NumComments }} Comments</span>
+            Last Updated: <time>{{ .UpdateTime.Local.Format "2006-01-02 15:04:05 MST" }}</time>
+            </a>
+        <li>
+            {{- end -}}
+    </ul>
+</div>

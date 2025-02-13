@@ -13,6 +13,24 @@ import (
 
 const DB_FILE = "file:data.sqlite3"
 
+func ListPages(w http.ResponseWriter, r *http.Request) {
+	ctx := context.WithValue(r.Context(), "now", time.Now().Unix())
+	pdb := data.New(DB_FILE)
+
+	pageInfos, err := pdb.GetPagesInfo(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "Failed to get info on pages", slog.String("error", err.Error()))
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintln(w, "<h1>Internal Server Error</h1>")
+		return
+	}
+
+	err = tmpls.ExecuteTemplate(w, "pages.html", pageInfos)
+	if err != nil {
+		slog.ErrorContext(ctx, "An error occured while executing template", slog.String("error", err.Error()))
+	}
+}
+
 func GetComments(w http.ResponseWriter, r *http.Request) {
 	// TODO: reuse db connection
 	pdb := data.New(DB_FILE)
@@ -28,7 +46,7 @@ func GetComments(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "<h1>Error 404</h1><p>Comments for page %s not found</p>\n", pageUrl)
 		return
 	} else if err != nil {
-		slog.ErrorContext(r.Context(), "Failed to get Page Comments", slog.Any("error", err))
+		slog.ErrorContext(ctx, "Failed to get Page Comments", slog.Any("error", err))
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintln(w, "<h1>Internal Server Error</h1>")
 		return
@@ -43,15 +61,15 @@ func GetComments(w http.ResponseWriter, r *http.Request) {
 
 // TODO: parse form data
 func PostComment(w http.ResponseWriter, r *http.Request) {
-	pageUrl := r.PathValue("pageUrl")
+	// pageUrl := r.PathValue("pageUrl")
 	// TODO: extract user from request and add to context
 
 	r.ParseForm()
-	comment := r.Form.Get("commentText")
+	// comment := r.Form.Get("commentText")
 	// TODO: run filters over text
 
-	pdb := data.New(DB_FILE)
-	pdb.PostComment(r.Context(), pageUrl, "", comment, nil)
+	// pdb := data.New(DB_FILE)
+	// pdb.PostComment(r.Context(), pageUrl, "", comment, nil)
 }
 
 func NewComment(w http.ResponseWriter, r *http.Request) {
@@ -76,6 +94,7 @@ func NewMux() *http.ServeMux {
 
 	logger := slog.Default()
 
+	mux.HandleFunc("/", ListPages)
 	mux.HandleFunc("/penny/comments/{pageUrl...}", GetComments)
 	mux.Handle("GET /penny/new/comments/{pageUrl...}", Log(http.HandlerFunc(NewComment), logger))
 	mux.Handle("POST /penny/new/comments/{pageUrl...}", Log(http.HandlerFunc(PostComment), logger))

@@ -52,6 +52,23 @@ func parseComment(ctx context.Context, row *sql.Rows, stmt *sql.Stmt, unixTime i
 	return comment, nil
 }
 
+func parsePageInfo(rows *sql.Rows, unixTime int64) (PageInfo, error) {
+	var openTime sql.NullInt64
+	var lastUpdate int64
+	pi := PageInfo{}
+	if err := rows.Scan(&pi.Url, &openTime, &lastUpdate, &pi.NumComments); err != nil {
+		return pi, err
+	}
+
+	if openTime.Valid {
+		pi.Open = openTime.Int64 > unixTime
+	}
+
+	pi.UpdateTime = time.Unix(lastUpdate, 0)
+
+	return pi, nil
+}
+
 func (p PennyDB) GetPageCommentsById(ctx context.Context, pageId int) (*Page, error) {
 	now, ok := ctx.Value("now").(int64)
 	if !ok {
@@ -199,4 +216,34 @@ func (p PennyDB) GetCommentById(ctx context.Context, commentId int) (Comment, er
 	}
 
 	return comment, nil
+}
+
+func (p PennyDB) GetPagesInfo(ctx context.Context) ([]PageInfo, error) {
+	now, ok := ctx.Value("now").(int64)
+	if !ok {
+		return nil, errors.New("Missing `now` in context")
+	}
+
+	rows, err := p.Db.QueryContext(ctx, `
+    SELECT url, commentsOpenTime, MAX(postedTime) AS newestPostedTime, COUNT(*) AS numComments
+    FROM Pages JOIN Comments
+    ON Pages.id = Comments.pageId
+    GROUP BY Comments.PageId
+    `)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	pageInfos := make([]PageInfo, 0, 32)
+	for rows.Next() {
+		pageInfo, err := parsePageInfo(rows, now)
+		if err != nil {
+			return nil, err
+		}
+
+		pageInfos = append(pageInfos, pageInfo)
+	}
+
+	return pageInfos, nil
 }

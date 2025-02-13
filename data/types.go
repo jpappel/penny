@@ -23,11 +23,17 @@ type Comment struct {
 	Replies []int
 }
 
+type PageInfo struct {
+	Url         string
+	UpdateTime  time.Time // TODO: change update time to time of last comment post
+	Open        bool
+	NumComments int
+}
+
 // TODO: put pages into a pool
 type Page struct {
-	Url        string
-	UpdateTime time.Time
-	Comments   []Comment
+	PageInfo
+	Comments []Comment
 }
 
 func (c Comment) String() string {
