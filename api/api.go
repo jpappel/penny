@@ -89,15 +89,21 @@ func NewComment(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func NewMux() *http.ServeMux {
+func NewMux(baseUrl string) *http.ServeMux {
+	var base string
+	if baseUrl == "" {
+		base = ""
+	} else {
+		base = fmt.Sprint("/", baseUrl)
+	}
 	mux := http.NewServeMux()
 
 	logger := slog.Default()
 
-	mux.HandleFunc("/", ListPages)
-	mux.HandleFunc("/penny/comments/{pageUrl...}", GetComments)
-	mux.Handle("GET /penny/new/comments/{pageUrl...}", Log(http.HandlerFunc(NewComment), logger))
-	mux.Handle("POST /penny/new/comments/{pageUrl...}", Log(http.HandlerFunc(PostComment), logger))
+	mux.HandleFunc(fmt.Sprint("/", baseUrl), ListPages)
+	mux.HandleFunc(fmt.Sprint(base, "/comments/{pageUrl...}"), GetComments)
+	mux.Handle(fmt.Sprintf("GET %s/new/comments/{pageUrl...}", base), Log(http.HandlerFunc(NewComment), logger))
+	mux.Handle(fmt.Sprintf("POST %s/new/comments/{pageUrl...}", base), Log(http.HandlerFunc(PostComment), logger))
 
 	return mux
 }

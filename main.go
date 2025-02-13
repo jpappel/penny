@@ -16,6 +16,9 @@ import (
 )
 
 type Config struct {
+	Host           string   `json:"hostname"`
+	Port           int      `json:"port"`
+	BaseUrl        string   `json:"base_url"`
 	RenderMD       bool     `json:"render_markdown"`
 	Providers      []string `json:"providers"`
 	EnvFilename    string   `json:"env_file"`
@@ -115,13 +118,13 @@ func parseConfig(filename string) Config {
 
 func main() {
 	// TODO: setup config loading hierarchy
-	const HOSTNAME = ""
-	const PORT = 8080
-	addr := fmt.Sprintf("%s:%d", HOSTNAME, PORT)
+	config := parseConfig("config.json")
+	if config.Port <= 0 {
+		config.Port = 8080
+	}
 
-	// config := parseConfig("config.json")
-
-	mux := api.NewMux()
+	addr := fmt.Sprintf("%s:%d", config.Host, config.Port)
+	mux := api.NewMux(config.BaseUrl)
 
 	data.New("file:data.sqlite3")
 
